@@ -2,7 +2,7 @@
   "name": "yjs",
   "version": "13.0.0-66",
   "description": "A framework for real-time p2p shared editing on any data",
-  "main": "./y.node.js",
+  "main": "./src/Y.dist.js",
   "browser": "./y.js",
   "module": "./src/y.js",
   "scripts": {

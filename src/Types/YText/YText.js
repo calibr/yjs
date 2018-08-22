@@ -553,6 +553,12 @@ export default class YText extends YArray {
           case ItemString:
             str += n._content
             break
+          case ItemEmbed:
+            packStr()
+            ops.push({
+              insert: n.embed
+            })
+            break
           case ItemFormat:
             packStr()
             updateCurrentAttributes(currentAttributes, n)

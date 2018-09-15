@@ -6,10 +6,12 @@
  */
 
 (function (global, factory) {
-  typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
-  typeof define === 'function' && define.amd ? define(factory) :
-  (global.Y = factory());
-}(this, (function () { 'use strict';
+  typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory(require('events')) :
+  typeof define === 'function' && define.amd ? define(['events'], factory) :
+  (global.Y = factory(global.EventEmitter));
+}(this, (function (EventEmitter) { 'use strict';
+
+  EventEmitter = EventEmitter && EventEmitter.hasOwnProperty('default') ? EventEmitter['default'] : EventEmitter;
 
   var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
     return typeof obj;
@@ -7523,7 +7525,7 @@
         binding._restoreUndoStackInfo(info);
       });
     }
-    return performedUndo;
+    return [performedUndo, undoOp];
   }
 
   /**
@@ -7531,28 +7533,30 @@
    * undoing and redoing of locally created changes.
    */
 
-  var UndoManager = function () {
+  var UndoManager = function (_EventEmitter) {
+    inherits(UndoManager, _EventEmitter);
+
     /**
      * @param {YType} scope The scope on which to listen for changes.
      * @param {Object} options Optionally provided configuration.
      */
     function UndoManager(scope) {
-      var _this2 = this;
-
       var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
       classCallCheck(this, UndoManager);
 
-      this.options = options;
-      this._bindings = new Set(options.bindings);
+      var _this2 = possibleConstructorReturn(this, (UndoManager.__proto__ || Object.getPrototypeOf(UndoManager)).call(this));
+
+      _this2.options = options;
+      _this2._bindings = new Set(options.bindings);
       options.captureTimeout = options.captureTimeout == null ? 500 : options.captureTimeout;
-      this._undoBuffer = [];
-      this._redoBuffer = [];
-      this._scope = scope;
-      this._undoing = false;
-      this._redoing = false;
-      this._lastTransactionWasUndo = false;
+      _this2._undoBuffer = [];
+      _this2._redoBuffer = [];
+      _this2._scope = scope;
+      _this2._undoing = false;
+      _this2._redoing = false;
+      _this2._lastTransactionWasUndo = false;
       var y = scope._y;
-      this.y = y;
+      _this2.y = y;
       y._hasUndoManager = true;
       var bindingInfos = void 0;
       y.on('beforeTransaction', function (y, transaction, remote) {
@@ -7583,6 +7587,7 @@
             } else {
               _this2._lastTransactionWasUndo = false;
               _this2._undoBuffer.push(reverseOperation);
+              _this2.emit('undo-push', reverseOperation);
             }
             if (!_this2._redoing) {
               _this2._redoBuffer = [];
@@ -7590,9 +7595,11 @@
           } else {
             _this2._lastTransactionWasUndo = true;
             _this2._redoBuffer.push(reverseOperation);
+            _this2.emit('redo-push', reverseOperation);
           }
         }
       });
+      return _this2;
     }
 
     /**
@@ -7614,8 +7621,14 @@
       key: 'undo',
       value: function undo() {
         this._undoing = true;
-        var performedUndo = applyReverseOperation(this.y, this._scope, this._undoBuffer);
+
+        var _applyReverseOperatio = applyReverseOperation(this.y, this._scope, this._undoBuffer),
+            _applyReverseOperatio2 = slicedToArray(_applyReverseOperatio, 2),
+            performedUndo = _applyReverseOperatio2[0],
+            op = _applyReverseOperatio2[1];
+
         this._undoing = false;
+        this.emit('undo', op);
         return performedUndo;
       }
 
@@ -7627,13 +7640,19 @@
       key: 'redo',
       value: function redo() {
         this._redoing = true;
-        var performedRedo = applyReverseOperation(this.y, this._scope, this._redoBuffer);
+
+        var _applyReverseOperatio3 = applyReverseOperation(this.y, this._scope, this._redoBuffer),
+            _applyReverseOperatio4 = slicedToArray(_applyReverseOperatio3, 2),
+            performedRedo = _applyReverseOperatio4[0],
+            op = _applyReverseOperatio4[1];
+
         this._redoing = false;
+        this.emit('redo', op);
         return performedRedo;
       }
     }]);
     return UndoManager;
-  }();
+  }(EventEmitter);
 
   function createCommonjsModule(fn, module) {
   	return module = { exports: {} }, fn(module, module.exports), module.exports;

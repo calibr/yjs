@@ -1,5 +1,6 @@
 import ID from './ID/ID.js'
 import isParentOf from './isParentOf.js'
+import EventEmitter from 'events'
 
 class ReverseOperation {
   constructor (y, transaction, bindingInfos) {
@@ -79,19 +80,20 @@ function applyReverseOperation (y, scope, reverseBuffer) {
       binding._restoreUndoStackInfo(info)
     })
   }
-  return performedUndo
+  return [performedUndo, undoOp]
 }
 
 /**
  * Saves a history of locally applied operations. The UndoManager handles the
  * undoing and redoing of locally created changes.
  */
-export default class UndoManager {
+export default class UndoManager extends EventEmitter {
   /**
    * @param {YType} scope The scope on which to listen for changes.
    * @param {Object} options Optionally provided configuration.
    */
   constructor (scope, options = {}) {
+    super()
     this.options = options
     this._bindings = new Set(options.bindings)
     options.captureTimeout = options.captureTimeout == null ? 500 : options.captureTimeout
@@ -138,6 +140,7 @@ export default class UndoManager {
           } else {
             this._lastTransactionWasUndo = false
             this._undoBuffer.push(reverseOperation)
+            this.emit('undo-push', reverseOperation)
           }
           if (!this._redoing) {
             this._redoBuffer = []
@@ -145,6 +148,7 @@ export default class UndoManager {
         } else {
           this._lastTransactionWasUndo = true
           this._redoBuffer.push(reverseOperation)
+          this.emit('redo-push', reverseOperation)
         }
       }
     })
@@ -162,8 +166,9 @@ export default class UndoManager {
    */
   undo () {
     this._undoing = true
-    const performedUndo = applyReverseOperation(this.y, this._scope, this._undoBuffer)
+    const [performedUndo, op] = applyReverseOperation(this.y, this._scope, this._undoBuffer)
     this._undoing = false
+    this.emit('undo', op)
     return performedUndo
   }
 
@@ -172,8 +177,9 @@ export default class UndoManager {
    */
   redo () {
     this._redoing = true
-    const performedRedo = applyReverseOperation(this.y, this._scope, this._redoBuffer)
+    const [performedRedo, op] = applyReverseOperation(this.y, this._scope, this._redoBuffer)
     this._redoing = false
+    this.emit('redo', op)
     return performedRedo
   }
 }

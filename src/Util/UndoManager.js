@@ -103,11 +103,15 @@ export default class UndoManager extends EventEmitter {
     this._undoing = false
     this._redoing = false
     this._lastTransactionWasUndo = false
+    this._skipping = false
     const y = scope._y
     this.y = y
     y._hasUndoManager = true
     let bindingInfos
     y.on('beforeTransaction', (y, transaction, remote) => {
+      if(this._skipping) {
+        return
+      }
       if (!remote) {
         // Store binding information before transaction is executed
         // By restoring the binding information, we can make sure that the state
@@ -119,6 +123,9 @@ export default class UndoManager extends EventEmitter {
       }
     })
     y.on('afterTransaction', (y, transaction, remote) => {
+      if(this._skipping) {
+        return
+      }
       if (!remote && transaction.changedParentTypes.has(scope)) {
         let reverseOperation = new ReverseOperation(y, transaction, bindingInfos)
         if (!this._undoing) {
@@ -181,5 +188,13 @@ export default class UndoManager extends EventEmitter {
     this._redoing = false
     this.emit('redo', op)
     return performedRedo
+  }
+
+  startSkipping() {
+    this._skipping = true
+  }
+
+  stopSkipping() {
+    this._skipping = false
   }
 }

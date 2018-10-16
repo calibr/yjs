@@ -7555,11 +7555,15 @@
       _this2._undoing = false;
       _this2._redoing = false;
       _this2._lastTransactionWasUndo = false;
+      _this2._skipping = false;
       var y = scope._y;
       _this2.y = y;
       y._hasUndoManager = true;
       var bindingInfos = void 0;
       y.on('beforeTransaction', function (y, transaction, remote) {
+        if (_this2._skipping) {
+          return;
+        }
         if (!remote) {
           // Store binding information before transaction is executed
           // By restoring the binding information, we can make sure that the state
@@ -7571,6 +7575,9 @@
         }
       });
       y.on('afterTransaction', function (y, transaction, remote) {
+        if (_this2._skipping) {
+          return;
+        }
         if (!remote && transaction.changedParentTypes.has(scope)) {
           var reverseOperation = new ReverseOperation(y, transaction, bindingInfos);
           if (!_this2._undoing) {
@@ -7649,6 +7656,16 @@
         this._redoing = false;
         this.emit('redo', op);
         return performedRedo;
+      }
+    }, {
+      key: 'startSkipping',
+      value: function startSkipping() {
+        this._skipping = true;
+      }
+    }, {
+      key: 'stopSkipping',
+      value: function stopSkipping() {
+        this._skipping = false;
       }
     }]);
     return UndoManager;
@@ -7802,13 +7819,6 @@
     return Math.ceil(ms / n) + ' ' + name + 's';
   }
 
-  var index$1 = /*#__PURE__*/Object.freeze({
-    default: index,
-    __moduleExports: index
-  });
-
-  var require$$0 = ( index$1 && index ) || index$1;
-
   var debug = createCommonjsModule(function (module, exports) {
     /**
      * This is the common logic for both the Node.js and web browser
@@ -7822,7 +7832,7 @@
     exports.disable = disable;
     exports.enable = enable;
     exports.enabled = enabled;
-    exports.humanize = require$$0;
+    exports.humanize = index;
 
     /**
      * The currently active debug mode names, and names to skip.
@@ -7902,19 +7912,19 @@
         }
 
         // apply any `formatters` transformations
-        var index = 0;
+        var index$$1 = 0;
         args[0] = args[0].replace(/%([a-zA-Z%])/g, function (match, format) {
           // if we encounter an escaped % then don't increase the array index
           if (match === '%%') return match;
-          index++;
+          index$$1++;
           var formatter = exports.formatters[format];
           if ('function' === typeof formatter) {
-            var val = args[index];
+            var val = args[index$$1];
             match = formatter.call(self, val);
 
             // now we need to remove `args[index]` since it's inlined in the `format`
-            args.splice(index, 1);
-            index--;
+            args.splice(index$$1, 1);
+            index$$1--;
           }
           return match;
         });
@@ -8022,6 +8032,21 @@
   var debug_7 = debug.skips;
   var debug_8 = debug.formatters;
 
+  var debug$1 = /*#__PURE__*/Object.freeze({
+    default: debug,
+    __moduleExports: debug,
+    coerce: debug_1,
+    disable: debug_2,
+    enable: debug_3,
+    enabled: debug_4,
+    humanize: debug_5,
+    names: debug_6,
+    skips: debug_7,
+    formatters: debug_8
+  });
+
+  var require$$0 = ( debug$1 && debug ) || debug$1;
+
   var browser = createCommonjsModule(function (module, exports) {
     /**
      * This is the web browser implementation of `debug()`.
@@ -8029,7 +8054,7 @@
      * Expose `debug()` as the module.
      */
 
-    exports = module.exports = debug;
+    exports = module.exports = require$$0;
     exports.log = log;
     exports.formatArgs = formatArgs;
     exports.save = save;

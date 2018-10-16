@@ -7,6 +7,10 @@
 
 'use strict';
 
+function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
+
+var EventEmitter = _interopDefault(require('events'));
+
 function rotate (tree, parent, newParent, n) {
   if (parent === null) {
     tree.root = newParent;
@@ -6066,19 +6070,20 @@ function applyReverseOperation (y, scope, reverseBuffer) {
       binding._restoreUndoStackInfo(info);
     });
   }
-  return performedUndo
+  return [performedUndo, undoOp]
 }
 
 /**
  * Saves a history of locally applied operations. The UndoManager handles the
  * undoing and redoing of locally created changes.
  */
-class UndoManager {
+class UndoManager extends EventEmitter {
   /**
    * @param {YType} scope The scope on which to listen for changes.
    * @param {Object} options Optionally provided configuration.
    */
   constructor (scope, options = {}) {
+    super();
     this.options = options;
     this._bindings = new Set(options.bindings);
     options.captureTimeout = options.captureTimeout == null ? 500 : options.captureTimeout;
@@ -6088,11 +6093,15 @@ class UndoManager {
     this._undoing = false;
     this._redoing = false;
     this._lastTransactionWasUndo = false;
+    this._skipping = false;
     const y = scope._y;
     this.y = y;
     y._hasUndoManager = true;
     let bindingInfos;
     y.on('beforeTransaction', (y, transaction, remote) => {
+      if(this._skipping) {
+        return
+      }
       if (!remote) {
         // Store binding information before transaction is executed
         // By restoring the binding information, we can make sure that the state
@@ -6104,6 +6113,9 @@ class UndoManager {
       }
     });
     y.on('afterTransaction', (y, transaction, remote) => {
+      if(this._skipping) {
+        return
+      }
       if (!remote && transaction.changedParentTypes.has(scope)) {
         let reverseOperation = new ReverseOperation(y, transaction, bindingInfos);
         if (!this._undoing) {
@@ -6125,6 +6137,7 @@ class UndoManager {
           } else {
             this._lastTransactionWasUndo = false;
             this._undoBuffer.push(reverseOperation);
+            this.emit('undo-push', reverseOperation);
           }
           if (!this._redoing) {
             this._redoBuffer = [];
@@ -6132,6 +6145,7 @@ class UndoManager {
         } else {
           this._lastTransactionWasUndo = true;
           this._redoBuffer.push(reverseOperation);
+          this.emit('redo-push', reverseOperation);
         }
       }
     });
@@ -6149,8 +6163,9 @@ class UndoManager {
    */
   undo () {
     this._undoing = true;
-    const performedUndo = applyReverseOperation(this.y, this._scope, this._undoBuffer);
+    const [performedUndo, op] = applyReverseOperation(this.y, this._scope, this._undoBuffer);
     this._undoing = false;
+    this.emit('undo', op);
     return performedUndo
   }
 
@@ -6159,9 +6174,18 @@ class UndoManager {
    */
   redo () {
     this._redoing = true;
-    const performedRedo = applyReverseOperation(this.y, this._scope, this._redoBuffer);
+    const [performedRedo, op] = applyReverseOperation(this.y, this._scope, this._redoBuffer);
     this._redoing = false;
+    this.emit('redo', op);
     return performedRedo
+  }
+
+  startSkipping() {
+    this._skipping = true;
+  }
+
+  stopSkipping() {
+    this._skipping = false;
   }
 }
 
@@ -6322,13 +6346,6 @@ function plural(ms, n, name) {
   return Math.ceil(ms / n) + ' ' + name + 's';
 }
 
-var index$1 = /*#__PURE__*/Object.freeze({
-  default: index,
-  __moduleExports: index
-});
-
-var require$$0 = ( index$1 && index ) || index$1;
-
 var debug = createCommonjsModule(function (module, exports) {
 /**
  * This is the common logic for both the Node.js and web browser
@@ -6342,7 +6359,7 @@ exports.coerce = coerce;
 exports.disable = disable;
 exports.enable = enable;
 exports.enabled = enabled;
-exports.humanize = require$$0;
+exports.humanize = index;
 
 /**
  * The currently active debug mode names, and names to skip.
@@ -6421,19 +6438,19 @@ function createDebug(namespace) {
     }
 
     // apply any `formatters` transformations
-    var index = 0;
+    var index$$1 = 0;
     args[0] = args[0].replace(/%([a-zA-Z%])/g, function(match, format) {
       // if we encounter an escaped % then don't increase the array index
       if (match === '%%') return match;
-      index++;
+      index$$1++;
       var formatter = exports.formatters[format];
       if ('function' === typeof formatter) {
-        var val = args[index];
+        var val = args[index$$1];
         match = formatter.call(self, val);
 
         // now we need to remove `args[index]` since it's inlined in the `format`
-        args.splice(index, 1);
-        index--;
+        args.splice(index$$1, 1);
+        index$$1--;
       }
       return match;
     });

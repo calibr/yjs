@@ -1,5 +1,5 @@
 
-# ![Yjs](http://y-js.org/images/yjs.png)
+# ![Yjs](https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png)
 
 Yjs is a framework for offline-first p2p shared editing on structured data like
 text, richtext, json, or XML. It is fairly easy to get started, as Yjs hides
@@ -66,7 +66,7 @@ missing modules.
 
 ### CDN
 ```
-<script src="https://cdn.jsdelivr.net/npm/yjs@12/src/y.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/yjs@12/dist/y.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/y-array@10/dist/y-array.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/y-websockets-client@8/dist/y-websockets-client.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/y-memory@8/dist/y-memory.js"></script>
@@ -248,7 +248,7 @@ The promise returns an instance of Y. We denote it with a lower case `y`.
   * y-websockets-client aways waits to sync with the server
 * y.connector.disconnect()
   * Force to disconnect this instance from the other instances
-* y.connector.reconnect()
+* y.connector.connect()
   * Try to reconnect to the other instances (needs to be supported by the
     connector)
   * Not supported by y-xmpp

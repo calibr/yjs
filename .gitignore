@@ -1,6 +1,10 @@
 node_modules
 bower_components
 docs
-/examples/yjs-dist.js*
+/y.*
+/examples_all/*/index.dist.*
+.vscode
+.yjsPersisted
+build
 *.sublime-project
 *.sublime-workspace

@@ -35,9 +35,15 @@ const readMessage = (doc, buf) => {
   switch (messageType) {
     case messageSync:
       Y.encoding.writeVarUint(encoder, messageSync)
-      doc.mux(() =>
-        Y.syncProtocol.readSyncMessage(decoder, encoder, doc)
-      )
+      doc.mux(() => {
+        const syncMessageProcessedType = Y.syncProtocol.readSyncMessage(decoder, encoder, doc)
+        if(syncMessageProcessedType === 1) {
+          if(!doc._initialSyncComplete) {
+            doc._initialSyncComplete = true
+            doc.emit('synced')
+          }
+        }
+      })
       break
     case messageAwareness:
       Y.awarenessProtocol.readAwarenessMessage(decoder, doc)
@@ -108,22 +114,6 @@ class WebsocketsSharedDocument extends Y.Y {
     this.awarenessClock = new Map()
     setupWS(this, url)
     this.on('afterTransaction', broadcastUpdate)
-    this._bcSubscriber = data => {
-      const encoder = readMessage(this, data) // already muxed
-      this.mux(() => {
-        if (Y.encoding.length(encoder) > 1) {
-            bc.publish(url, Y.encoding.toBuffer(encoder))
-        }
-      })
-    }
-    bc.subscribe(url, this._bcSubscriber)
-    // send sync step1 to bc
-    this.mux(() => {
-      const encoder = Y.encoding.createEncoder()
-      Y.encoding.writeVarUint(encoder, messageSync)
-      Y.syncProtocol.writeSyncStep1(encoder, this)
-      bc.publish(url, Y.encoding.toBuffer(encoder))
-    })
   }
   getLocalAwarenessInfo () {
     return this._localAwarenessState

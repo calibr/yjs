@@ -1,4 +1,3 @@
-import ID from './ID/ID.js'
 import { isParentOf } from './isParentOf.js'
 import EventEmitter from 'events'
 import * as ID from './ID.js'

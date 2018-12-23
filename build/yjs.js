@@ -6301,8 +6301,6 @@ class UndoManager extends EventEmitter {
   }
 }
 
-console.log('!!loading yjs!!', new Error().stack);
-
 registerStruct(0, GC);
 registerStruct(1, ItemJSON);
 registerStruct(2, ItemString);

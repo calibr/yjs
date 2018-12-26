@@ -39,6 +39,8 @@ export { getRelativePosition, fromRelativePosition } from './utils/relativePosit
 export { registerStruct } from './utils/structReferences.js'
 export * from './lib/mutex.js'
 
+export * from './provider/websocket'
+
 registerStruct(0, GC)
 registerStruct(1, ItemJSON)
 registerStruct(2, ItemString)

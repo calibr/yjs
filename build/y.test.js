@@ -12525,6 +12525,16 @@
    * @module awareness-protocol
    */
 
+  /* eslint-env browser */
+
+  /*
+  Unlike stated in the LICENSE file, it is not necessary to include the copyright notice and permission notice when you copy code from this file.
+  */
+
+  /**
+   * @module provider/websocket
+   */
+
   registerStruct(0, GC);
   registerStruct(1, ItemJSON);
   registerStruct(2, ItemString);

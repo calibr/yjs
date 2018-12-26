@@ -6301,6 +6301,182 @@ class UndoManager extends EventEmitter {
   }
 }
 
+/**
+ * @module string
+ */
+
+/* eslint-env browser */
+
+/* eslint-env browser */
+
+/*
+Unlike stated in the LICENSE file, it is not necessary to include the copyright notice and permission notice when you copy code from this file.
+*/
+
+const messageSync = 0;
+const messageAwareness = 1;
+const messageAuth = 2;
+
+const reconnectTimeout = 3000;
+
+/**
+ * @param {WebsocketsSharedDocument} doc
+ * @param {string} reason
+ */
+const permissionDeniedHandler = (doc, reason) => console.warn(`Permission denied to access ${doc.url}.\n${reason}`);
+
+/**
+ * @param {WebsocketsSharedDocument} doc
+ * @param {ArrayBuffer} buf
+ * @return {Y.encoding.Encoder}
+ */
+const readMessage = (doc, buf) => {
+  const decoder = createDecoder(buf);
+  const encoder = createEncoder();
+  const messageType = readVarUint(decoder);
+  switch (messageType) {
+    case messageSync:
+      writeVarUint(encoder, messageSync);
+      doc.mux(() => {
+        const syncMessageProcessedType = readSyncMessage(decoder, encoder, doc);
+        if(syncMessageProcessedType === 1) {
+          if(!doc._initialSyncComplete) {
+            doc._initialSyncComplete = true;
+            doc.emit('synced');
+          }
+        }
+      });
+      break
+    case messageAwareness:
+      readAwarenessMessage(decoder, doc);
+      break
+    case messageAuth:
+      readAuthMessage(decoder, doc, permissionDeniedHandler);
+  }
+  return encoder
+};
+
+const setupWS = (doc, url) => {
+  const websocket = new WebSocket(url);
+  websocket.binaryType = 'arraybuffer';
+  doc.ws = websocket;
+  websocket.onmessage = event => {
+    const encoder = readMessage(doc, event.data);
+    if (length(encoder) > 1) {
+      websocket.send(toBuffer(encoder));
+    }
+  };
+  websocket.onclose = () => {
+    doc.ws = null;
+    doc.wsconnected = false;
+    doc.emit('status', {
+      status: 'connected'
+    });
+    setTimeout(setupWS, reconnectTimeout, doc, url);
+  };
+  websocket.onopen = () => {
+    doc.wsconnected = true;
+    doc.emit('status', {
+      status: 'disconnected'
+    });
+    // always send sync step 1 when connected
+    const encoder = createEncoder();
+    writeVarUint(encoder, messageSync);
+    writeSyncStep1(encoder, doc);
+    websocket.send(toBuffer(encoder));
+    // force send stored awareness info
+    doc.setAwarenessField(null, null);
+  };
+};
+
+const broadcastUpdate = (y, transaction) => {
+  if (transaction.encodedStructsLen > 0) {
+    y.mux(() => {
+      const encoder = createEncoder();
+      writeVarUint(encoder, messageSync);
+      writeUpdate(encoder, transaction.encodedStructsLen, transaction.encodedStructs);
+      const buf = toBuffer(encoder);
+      if (y.wsconnected) {
+        y.ws.send(buf);
+      }
+    });
+  }
+};
+
+class WebsocketsSharedDocument extends Y {
+  constructor (url) {
+    super();
+    this.url = url;
+    this.wsconnected = false;
+    this.mux = createMutex();
+    this.ws = null;
+    this._localAwarenessState = {};
+    this.awareness = new Map();
+    this.awarenessClock = new Map();
+    setupWS(this, url);
+    this.on('afterTransaction', broadcastUpdate);
+  }
+  getLocalAwarenessInfo () {
+    return this._localAwarenessState
+  }
+  getAwarenessInfo () {
+    return this.awareness
+  }
+  setAwarenessField (field, value) {
+    if (field !== null) {
+      this._localAwarenessState[field] = value;
+    }
+    if (this.wsconnected) {
+      const clock = (this.awarenessClock.get(this.userID) || 0) + 1;
+      this.awarenessClock.set(this.userID, clock);
+      const encoder = createEncoder();
+      writeVarUint(encoder, messageAwareness);
+      writeUsersStateChange(encoder, [{ userID: this.userID, state: this._localAwarenessState, clock }]);
+      const buf = toBuffer(encoder);
+      this.ws.send(buf);
+    }
+  }
+}
+
+/**
+ * Websocket Provider for Yjs. Creates a single websocket connection to each document.
+ * The document name is attached to the provided url. I.e. the following example
+ * creates a websocket connection to http://localhost:1234/my-document-name
+ *
+ * @example
+ *   import { WebsocketProvider } from 'yjs/provider/websocket/client.js'
+ *   const provider = new WebsocketProvider('http://localhost:1234')
+ *   const ydocument = provider.get('my-document-name')
+ */
+class WebsocketProvider$$1 {
+  constructor (url) {
+    // ensure that url is always ends with /
+    while (url[url.length - 1] === '/') {
+      url = url.slice(0, url.length - 1);
+    }
+    this.url = url + '/';
+    /**
+     * @type {Map<string, WebsocketsSharedDocument>}
+     */
+    this.docs = new Map();
+  }
+  /**
+   * @param {string} name
+   * @return {WebsocketsSharedDocument}
+   */
+  get (name) {
+    let doc = this.docs.get(name);
+    if (doc === undefined) {
+      doc = new WebsocketsSharedDocument(this.url + name);
+    }
+    return doc
+  }
+}
+
+/**
+ * @module provider/websocket
+ */
+
 registerStruct(0, GC);
 registerStruct(1, ItemJSON);
 registerStruct(2, ItemString);
@@ -6335,4 +6511,5 @@ exports.getRelativePosition = getRelativePosition;
 exports.fromRelativePosition = fromRelativePosition;
 exports.registerStruct = registerStruct;
 exports.createMutex = createMutex;
+exports.WebsocketProvider = WebsocketProvider$$1;
 //# sourceMappingURL=yjs.js.map

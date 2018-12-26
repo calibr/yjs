@@ -97,7 +97,6 @@ const broadcastUpdate = (y, transaction) => {
       if (y.wsconnected) {
         y.ws.send(buf)
       }
-      bc.publish(y.url, buf)
     })
   }
 }

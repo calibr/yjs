@@ -23,7 +23,7 @@
     "docs/*",
     "examples/*",
     "lib/*",
-    "persistences/*",
+    "persistence/*",
     "protocols/*",
     "provider/*",
     "bindings/*",

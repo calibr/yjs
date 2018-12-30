@@ -12,8 +12,8 @@ import * as logging from '../../lib/logging.js'
 import * as idb from '../../lib/idb.js'
 import * as decoding from '../../lib/decoding.js'
 import { Y } from '../../utils/Y.js'
-import { integrateRemoteStruct } from '../MessageHandler/integrateRemoteStructs.js'
-import { createMutualExclude } from '../../lib/mutualExclude.js'
+import { integrateRemoteStruct } from '../../utils/integrateRemoteStructs.js'
+import { createMutex as createMutualExclude } from '../../lib/mutex.js'
 
 import * as NamedEventHandler from './NamedEventHandler.js'
 

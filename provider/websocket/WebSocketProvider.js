@@ -37,8 +37,8 @@ const readMessage = (doc, buf) => {
       Y.encoding.writeVarUint(encoder, messageSync)
       doc.mux(() => {
         const syncMessageProcessedType = Y.syncProtocol.readSyncMessage(decoder, encoder, doc)
-        if(syncMessageProcessedType === 1) {
-          if(!doc._initialSyncComplete) {
+        if (syncMessageProcessedType === 1) {
+          if (!doc._initialSyncComplete) {
             doc._initialSyncComplete = true
             doc.emit('synced')
           }

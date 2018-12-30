@@ -12535,21 +12535,6 @@
    * @module provider/websocket
    */
 
-  registerStruct(0, GC);
-  registerStruct(1, ItemJSON);
-  registerStruct(2, ItemString);
-  registerStruct(3, ItemFormat);
-  registerStruct(4, Delete);
-
-  registerStruct(5, YArray);
-  registerStruct(6, YMap);
-  registerStruct(7, YText);
-  registerStruct(8, YXmlFragment);
-  registerStruct(9, YXmlElement);
-  registerStruct(10, YXmlText);
-  registerStruct(11, YXmlHook);
-  registerStruct(12, ItemEmbed);
-
   /**
    * Try to merge all items in os with their successors.
    *
@@ -12571,37 +12556,69 @@
     let deletes = [];
     let node = os.findSmallestNode();
     let next = node.next();
+    let strBuffer = [];
+    let strBufferNode = null;
+    let concatStrItemWithBuf = (node) => {
+      node.val._content += strBuffer.join('');
+      delete node.val.__tmpMergeLength;
+    };
     while (next !== null) {
       let a = node.val;
       let b = next.val;
+      const aLen = a.__tmpMergeLength || a._length;
       if (
         (a instanceof ItemJSON || a instanceof ItemString) &&
         a.constructor === b.constructor &&
         a._deleted === b._deleted &&
         a._right === b &&
-        (createID(a._id.user, a._id.clock + a._length)).equals(b._id)
+        (createID(a._id.user, a._id.clock + aLen)).equals(b._id)
       ) {
         a._right = b._right;
         if (a instanceof ItemJSON) {
           a._content = a._content.concat(b._content);
         } else if (a instanceof ItemString) {
-          a._content += b._content;
+          strBufferNode = node;
+          strBuffer.push(b._content);
+          a.__tmpMergeLength = aLen + b._length;
         }
         // delete b later
         deletes.push(b._id);
         // do not iterate node!
         // !(node = next)
       } else {
+        if (strBuffer.length) {
+          concatStrItemWithBuf(node);
+          strBuffer = [];
+          strBufferNode = null;
+        }
         // not able to merge node, get next node
         node = next;
       }
       // update next
       next = next.next();
     }
+    if (strBuffer.length) {
+      concatStrItemWithBuf(strBufferNode);
+    }
     for (let i = deletes.length - 1; i >= 0; i--) {
       os.delete(deletes[i]);
     }
   };
+
+  registerStruct(0, GC);
+  registerStruct(1, ItemJSON);
+  registerStruct(2, ItemString);
+  registerStruct(3, ItemFormat);
+  registerStruct(4, Delete);
+
+  registerStruct(5, YArray);
+  registerStruct(6, YMap);
+  registerStruct(7, YText);
+  registerStruct(8, YXmlFragment);
+  registerStruct(9, YXmlElement);
+  registerStruct(10, YXmlText);
+  registerStruct(11, YXmlHook);
+  registerStruct(12, ItemEmbed);
 
   var commonjsGlobal$1 = typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 

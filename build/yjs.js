@@ -6211,7 +6211,7 @@ class UndoManager extends EventEmitter {
     y._hasUndoManager = true;
     let bindingInfos;
     y.on('beforeTransaction', (y, transaction, remote) => {
-      if(this._skipping) {
+      if (this._skipping) {
         return
       }
       if (!remote) {
@@ -6225,7 +6225,7 @@ class UndoManager extends EventEmitter {
       }
     });
     y.on('afterTransaction', (y, transaction, remote) => {
-      if(this._skipping) {
+      if (this._skipping) {
         return
       }
       if (!remote && transaction.changedParentTypes.has(scope)) {
@@ -6292,11 +6292,11 @@ class UndoManager extends EventEmitter {
     return performedRedo
   }
 
-  startSkipping() {
+  startSkipping () {
     this._skipping = true;
   }
 
-  stopSkipping() {
+  stopSkipping () {
     this._skipping = false;
   }
 }
@@ -6339,8 +6339,8 @@ const readMessage = (doc, buf) => {
       writeVarUint(encoder, messageSync);
       doc.mux(() => {
         const syncMessageProcessedType = readSyncMessage(decoder, encoder, doc);
-        if(syncMessageProcessedType === 1) {
-          if(!doc._initialSyncComplete) {
+        if (syncMessageProcessedType === 1) {
+          if (!doc._initialSyncComplete) {
             doc._initialSyncComplete = true;
             doc.emit('synced');
           }
@@ -6477,6 +6477,76 @@ class WebsocketProvider$$1 {
  * @module provider/websocket
  */
 
+/**
+ * Try to merge all items in os with their successors.
+ *
+ * Some transformations (like delete) fragment items.
+ * Item(c: 'ab') + Delete(1,1) + Delete(0, 1) -> Item(c: 'a',deleted);Item(c: 'b',deleted)
+ *
+ * This functions merges the fragmented nodes together:
+ * Item(c: 'a',deleted);Item(c: 'b',deleted) -> Item(c: 'ab', deleted)
+ *
+ * TODO: The Tree implementation does not support deletions in-spot.
+ *       This is why all deletions must be performed after the traversal.
+ *
+ */
+const defragmentItemContent = y => {
+  const os = y.os;
+  if (os.length < 2) {
+    return
+  }
+  let deletes = [];
+  let node = os.findSmallestNode();
+  let next = node.next();
+  let strBuffer = [];
+  let strBufferNode = null;
+  let concatStrItemWithBuf = (node) => {
+    node.val._content += strBuffer.join('');
+    delete node.val.__tmpMergeLength;
+  };
+  while (next !== null) {
+    let a = node.val;
+    let b = next.val;
+    const aLen = a.__tmpMergeLength || a._length;
+    if (
+      (a instanceof ItemJSON || a instanceof ItemString) &&
+      a.constructor === b.constructor &&
+      a._deleted === b._deleted &&
+      a._right === b &&
+      (createID(a._id.user, a._id.clock + aLen)).equals(b._id)
+    ) {
+      a._right = b._right;
+      if (a instanceof ItemJSON) {
+        a._content = a._content.concat(b._content);
+      } else if (a instanceof ItemString) {
+        strBufferNode = node;
+        strBuffer.push(b._content);
+        a.__tmpMergeLength = aLen + b._length;
+      }
+      // delete b later
+      deletes.push(b._id);
+      // do not iterate node!
+      // !(node = next)
+    } else {
+      if (strBuffer.length) {
+        concatStrItemWithBuf(node);
+        strBuffer = [];
+        strBufferNode = null;
+      }
+      // not able to merge node, get next node
+      node = next;
+    }
+    // update next
+    next = next.next();
+  }
+  if (strBuffer.length) {
+    concatStrItemWithBuf(strBufferNode);
+  }
+  for (let i = deletes.length - 1; i >= 0; i--) {
+    os.delete(deletes[i]);
+  }
+};
+
 registerStruct(0, GC);
 registerStruct(1, ItemJSON);
 registerStruct(2, ItemString);
@@ -6510,6 +6580,7 @@ exports.XmlFragment = YXmlFragment;
 exports.getRelativePosition = getRelativePosition;
 exports.fromRelativePosition = fromRelativePosition;
 exports.registerStruct = registerStruct;
+exports.defragmentItemContent = defragmentItemContent;
 exports.createMutex = createMutex;
 exports.WebsocketProvider = WebsocketProvider$$1;
 //# sourceMappingURL=yjs.js.map

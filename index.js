@@ -41,6 +41,9 @@ export * from './lib/mutex.js'
 
 export * from './provider/websocket'
 
+// export { createYdbClient } from './provider/ydb/index'
+export { defragmentItemContent } from './utils/defragmentItemContent'
+
 registerStruct(0, GC)
 registerStruct(1, ItemJSON)
 registerStruct(2, ItemString)

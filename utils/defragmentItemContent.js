@@ -28,32 +28,49 @@ export const defragmentItemContent = y => {
   let deletes = []
   let node = os.findSmallestNode()
   let next = node.next()
+  let strBuffer = []
+  let strBufferNode = null
+  let concatStrItemWithBuf = (node) => {
+    node.val._content += strBuffer.join('')
+    delete node.val.__tmpMergeLength
+  }
   while (next !== null) {
     let a = node.val
     let b = next.val
+    const aLen = a.__tmpMergeLength || a._length
     if (
       (a instanceof ItemJSON || a instanceof ItemString) &&
       a.constructor === b.constructor &&
       a._deleted === b._deleted &&
       a._right === b &&
-      (ID.createID(a._id.user, a._id.clock + a._length)).equals(b._id)
+      (ID.createID(a._id.user, a._id.clock + aLen)).equals(b._id)
     ) {
       a._right = b._right
       if (a instanceof ItemJSON) {
         a._content = a._content.concat(b._content)
       } else if (a instanceof ItemString) {
-        a._content += b._content
+        strBufferNode = node
+        strBuffer.push(b._content)
+        a.__tmpMergeLength = aLen + b._length
       }
       // delete b later
       deletes.push(b._id)
       // do not iterate node!
       // !(node = next)
     } else {
+      if (strBuffer.length) {
+        concatStrItemWithBuf(node)
+        strBuffer = []
+        strBufferNode = null
+      }
       // not able to merge node, get next node
       node = next
     }
     // update next
     next = next.next()
+  }
+  if (strBuffer.length) {
+    concatStrItemWithBuf(strBufferNode)
   }
   for (let i = deletes.length - 1; i >= 0; i--) {
     os.delete(deletes[i])

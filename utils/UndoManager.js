@@ -109,7 +109,7 @@ export class UndoManager extends EventEmitter {
     y._hasUndoManager = true
     let bindingInfos
     y.on('beforeTransaction', (y, transaction, remote) => {
-      if(this._skipping) {
+      if (this._skipping) {
         return
       }
       if (!remote) {
@@ -123,7 +123,7 @@ export class UndoManager extends EventEmitter {
       }
     })
     y.on('afterTransaction', (y, transaction, remote) => {
-      if(this._skipping) {
+      if (this._skipping) {
         return
       }
       if (!remote && transaction.changedParentTypes.has(scope)) {
@@ -190,11 +190,11 @@ export class UndoManager extends EventEmitter {
     return performedRedo
   }
 
-  startSkipping() {
+  startSkipping () {
     this._skipping = true
   }
 
-  stopSkipping() {
+  stopSkipping () {
     this._skipping = false
   }
 }

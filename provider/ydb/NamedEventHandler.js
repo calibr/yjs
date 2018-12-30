@@ -2,7 +2,7 @@
  * @module provider/ydb
  */
 
-import * as globals from './globals.js'
+import * as globals from '../../lib/globals.js'
 
 export const Class = class NamedEventHandler {
   constructor () {

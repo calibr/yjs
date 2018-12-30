@@ -2,10 +2,10 @@
  * @module provider/ydb
  */
 
-import * as encoding from './encoding.js'
-import * as decoding from './decoding.js'
+import * as encoding from '../../lib/encoding.js'
+import * as decoding from '../../lib/decoding.js'
 import * as idbactions from './idbactions.js'
-import * as logging from './logging.js'
+import * as logging from '../../lib/logging.js'
 import * as bc from './broadcastchannel.js'
 
 /* make sure to update message.go in ydb when updating these values.. */

@@ -6129,7 +6129,7 @@ class ReverseOperation {
   }
 }
 
-function applyReverseOperation (y, scope, reverseBuffer) {
+function applyReverseOperation (y, scopes, reverseBuffer) {
   let performedUndo = false;
   let undoOp = null;
   y.transact(() => {
@@ -6143,7 +6143,7 @@ function applyReverseOperation (y, scope, reverseBuffer) {
           while (op._deleted && op._redone !== null) {
             op = op._redone;
           }
-          if (op._deleted === false && isParentOf(scope, op)) {
+          if (op._deleted === false && scopes.find(scope => isParentOf(scope, op))) {
             performedUndo = true;
             op._delete(y);
           }
@@ -6157,7 +6157,7 @@ function applyReverseOperation (y, scope, reverseBuffer) {
         y.os.getItemCleanEnd(toState);
         y.os.iterate(fromState, toState, op => {
           if (
-            isParentOf(scope, op) &&
+            scopes.find(scope => isParentOf(scope, op)) &&
             op._parent !== y &&
             (
               op._id.user !== y.userID ||
@@ -6194,19 +6194,22 @@ class UndoManager extends EventEmitter {
    * @param {YType} scope The scope on which to listen for changes.
    * @param {Object} options Optionally provided configuration.
    */
-  constructor (scope, options = {}) {
+  constructor (scopes, options = {}) {
     super();
+    if(!Array.isArray(scopes)) {
+      scopes = [scopes];
+    }
     this.options = options;
     this._bindings = new Set(options.bindings);
     options.captureTimeout = options.captureTimeout == null ? 500 : options.captureTimeout;
     this._undoBuffer = [];
     this._redoBuffer = [];
-    this._scope = scope;
+    this._scopes = scopes;
     this._undoing = false;
     this._redoing = false;
     this._lastTransactionWasUndo = false;
     this._skipping = false;
-    const y = scope._y;
+    const y = scopes[0]._y;
     this.y = y;
     y._hasUndoManager = true;
     let bindingInfos;
@@ -6228,7 +6231,7 @@ class UndoManager extends EventEmitter {
       if (this._skipping) {
         return
       }
-      if (!remote && transaction.changedParentTypes.has(scope)) {
+      if (!remote && scopes.find(scope => transaction.changedParentTypes.has(scope))) {
         let reverseOperation = new ReverseOperation(y, transaction, bindingInfos);
         if (!this._undoing) {
           let lastUndoOp = this._undoBuffer.length > 0 ? this._undoBuffer[this._undoBuffer.length - 1] : null;
@@ -6275,7 +6278,7 @@ class UndoManager extends EventEmitter {
    */
   undo () {
     this._undoing = true;
-    const [performedUndo, op] = applyReverseOperation(this.y, this._scope, this._undoBuffer);
+    const [performedUndo, op] = applyReverseOperation(this.y, this._scopes, this._undoBuffer);
     this._undoing = false;
     this.emit('undo', op);
     return performedUndo
@@ -6286,7 +6289,7 @@ class UndoManager extends EventEmitter {
    */
   redo () {
     this._redoing = true;
-    const [performedRedo, op] = applyReverseOperation(this.y, this._scope, this._redoBuffer);
+    const [performedRedo, op] = applyReverseOperation(this.y, this._scopes, this._redoBuffer);
     this._redoing = false;
     this.emit('redo', op);
     return performedRedo

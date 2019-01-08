@@ -125,6 +125,9 @@ exports.LevelDbPersistence = class LevelDbPersistence {
    * @param {Y.Y} ydocument
    */
   writeState (docName, ydocument) {
+    if(this.conf.defragment) {
+      Y.defragmentItemContent(ydocument)
+    }
     return persistState(this.db, docName, ydocument)
   }
 }

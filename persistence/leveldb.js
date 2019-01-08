@@ -85,8 +85,11 @@ exports.LevelDbPersistence = class LevelDbPersistence {
   /**
    * @param {string} fpath Path to leveldb database
    */
-  constructor (fpath) {
+  constructor (fpath, conf = {}) {
     this.db = level(fpath, { valueEncoding: 'binary' })
+    this.conf = Object.assign({
+      writeStateOnLoad: true
+    }, conf)
   }
   /**
    * Retrieve all data from LevelDB and automatically persist all document updates to leveldb.
@@ -107,10 +110,12 @@ exports.LevelDbPersistence = class LevelDbPersistence {
       }
     })
     // read all data from persistence
-    return loadFromPersistence(this.db, docName, ydocument).then(() =>
+    return loadFromPersistence(this.db, docName, ydocument).then(() => {
       // write current state (just in case anything was added before state was bound)
-      this.writeState(docName, ydocument)
-    )
+      if(this.conf.writeStateOnLoad) {
+        this.writeState(docName, ydocument)
+      }
+    })
   }
   /**
    * Write current state to persistence layer. Deletes all entries that were made before.

@@ -7,3 +7,5 @@ docs
 .yjsPersisted
 *.sublime-project
 *.sublime-workspace
+.DS_Store
+t.js

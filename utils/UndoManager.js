@@ -1,5 +1,5 @@
 import { isParentOf } from './isParentOf.js'
-import EventEmitter from 'events'
+import { NamedEventHandler } from '../lib/NamedEventHandler'
 import * as ID from './ID.js'
 
 class ReverseOperation {
@@ -87,7 +87,7 @@ function applyReverseOperation (y, scopes, reverseBuffer) {
  * Saves a history of locally applied operations. The UndoManager handles the
  * undoing and redoing of locally created changes.
  */
-export class UndoManager extends EventEmitter {
+export class UndoManager extends NamedEventHandler {
   /**
    * @param {YType} scope The scope on which to listen for changes.
    * @param {Object} options Optionally provided configuration.

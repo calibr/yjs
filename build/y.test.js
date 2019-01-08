@@ -1,7 +1,5 @@
-(function (EventEmitter) {
+(function () {
   'use strict';
-
-  EventEmitter = EventEmitter && EventEmitter.hasOwnProperty('default') ? EventEmitter['default'] : EventEmitter;
 
   /**
    * @module tree
@@ -21009,7 +21007,7 @@
    * @constructor
    * @api public
    */
-  function EventEmitter$$1() {
+  function EventEmitter() {
     this._events = new Events();
     this._eventsCount = 0;
   }
@@ -21021,7 +21019,7 @@
    * @returns {Array}
    * @api public
    */
-  EventEmitter$$1.prototype.eventNames = function eventNames() {
+  EventEmitter.prototype.eventNames = function eventNames() {
     var names = []
       , events
       , name;
@@ -21047,7 +21045,7 @@
    * @returns {Array|Boolean}
    * @api public
    */
-  EventEmitter$$1.prototype.listeners = function listeners(event, exists) {
+  EventEmitter.prototype.listeners = function listeners(event, exists) {
     var evt = prefix ? prefix + event : event
       , available = this._events[evt];
 
@@ -21069,7 +21067,7 @@
    * @returns {Boolean} `true` if the event had listeners, else `false`.
    * @api public
    */
-  EventEmitter$$1.prototype.emit = function emit(event, a1, a2, a3, a4, a5) {
+  EventEmitter.prototype.emit = function emit(event, a1, a2, a3, a4, a5) {
     var evt = prefix ? prefix + event : event;
 
     if (!this._events[evt]) return false;
@@ -21130,7 +21128,7 @@
    * @returns {EventEmitter} `this`.
    * @api public
    */
-  EventEmitter$$1.prototype.on = function on(event, fn, context) {
+  EventEmitter.prototype.on = function on(event, fn, context) {
     var listener = new EE(fn, context || this)
       , evt = prefix ? prefix + event : event;
 
@@ -21150,7 +21148,7 @@
    * @returns {EventEmitter} `this`.
    * @api public
    */
-  EventEmitter$$1.prototype.once = function once(event, fn, context) {
+  EventEmitter.prototype.once = function once(event, fn, context) {
     var listener = new EE(fn, context || this, true)
       , evt = prefix ? prefix + event : event;
 
@@ -21171,7 +21169,7 @@
    * @returns {EventEmitter} `this`.
    * @api public
    */
-  EventEmitter$$1.prototype.removeListener = function removeListener(event, fn, context, once) {
+  EventEmitter.prototype.removeListener = function removeListener(event, fn, context, once) {
     var evt = prefix ? prefix + event : event;
 
     if (!this._events[evt]) return this;
@@ -21221,7 +21219,7 @@
    * @returns {EventEmitter} `this`.
    * @api public
    */
-  EventEmitter$$1.prototype.removeAllListeners = function removeAllListeners(event) {
+  EventEmitter.prototype.removeAllListeners = function removeAllListeners(event) {
     var evt;
 
     if (event) {
@@ -21241,31 +21239,31 @@
   //
   // Alias methods names because people roll like that.
   //
-  EventEmitter$$1.prototype.off = EventEmitter$$1.prototype.removeListener;
-  EventEmitter$$1.prototype.addListener = EventEmitter$$1.prototype.on;
+  EventEmitter.prototype.off = EventEmitter.prototype.removeListener;
+  EventEmitter.prototype.addListener = EventEmitter.prototype.on;
 
   //
   // This function doesn't apply anymore.
   //
-  EventEmitter$$1.prototype.setMaxListeners = function setMaxListeners() {
+  EventEmitter.prototype.setMaxListeners = function setMaxListeners() {
     return this;
   };
 
   //
   // Expose the prefix.
   //
-  EventEmitter$$1.prefixed = prefix;
+  EventEmitter.prefixed = prefix;
 
   //
   // Allow `EventEmitter` to be imported as module namespace.
   //
-  EventEmitter$$1.EventEmitter = EventEmitter$$1;
+  EventEmitter.EventEmitter = EventEmitter;
 
   //
   // Expose the module.
   //
   if ('undefined' !== typeof module) {
-    module.exports = EventEmitter$$1;
+    module.exports = EventEmitter;
   }
 
 
@@ -41809,5 +41807,5 @@
 
   // TODO: include all tests
 
-}(EventEmitter));
+}());
 //# sourceMappingURL=y.test.js.map

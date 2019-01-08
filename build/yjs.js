@@ -2,10 +2,6 @@
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
-function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
-
-var EventEmitter = _interopDefault(require('events'));
-
 /**
  * @module utils
  */
@@ -6189,7 +6185,7 @@ function applyReverseOperation (y, scopes, reverseBuffer) {
  * Saves a history of locally applied operations. The UndoManager handles the
  * undoing and redoing of locally created changes.
  */
-class UndoManager extends EventEmitter {
+class UndoManager extends NamedEventHandler {
   /**
    * @param {YType} scope The scope on which to listen for changes.
    * @param {Object} options Optionally provided configuration.

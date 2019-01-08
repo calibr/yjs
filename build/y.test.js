@@ -9225,7 +9225,7 @@
       super();
       this.gcEnabled = conf.gc || false;
       this._contentReady = false;
-      this.userID = generateRandomUint32();
+      this.userID = conf.userID || generateRandomUint32();
       // TODO: This should be a Map so we can use encodables as keys
       this._map = new Map();
       this.ds = new DeleteStore();

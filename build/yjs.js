@@ -631,6 +631,15 @@ const decode = decoder => {
   return createID(user, readVarUint(decoder))
 };
 
+var ID$1 = /*#__PURE__*/Object.freeze({
+  ID: ID,
+  createID: createID,
+  RootFakeUserID: RootFakeUserID,
+  RootID: RootID,
+  createRootID: createRootID,
+  decode: decode
+});
+
 const writeStructToTransaction = (transaction, struct) => {
   transaction.encodedStructsLen++;
   struct._toBinary(transaction.encodedStructs);
@@ -6566,6 +6575,7 @@ exports.encoding = encoding;
 exports.awarenessProtocol = awareness;
 exports.syncProtocol = sync;
 exports.authProtocol = auth;
+exports.ID = ID$1;
 exports.Y = Y;
 exports.UndoManager = UndoManager;
 exports.Transaction = Transaction;
@@ -6579,6 +6589,7 @@ exports.XmlFragment = YXmlFragment;
 exports.getRelativePosition = getRelativePosition;
 exports.fromRelativePosition = fromRelativePosition;
 exports.registerStruct = registerStruct;
+exports.DeleteStore = DeleteStore;
 exports.defragmentItemContent = defragmentItemContent;
 exports.createMutex = createMutex;
 exports.WebsocketProvider = WebsocketProvider$$1;

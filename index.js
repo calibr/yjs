@@ -21,8 +21,9 @@ import * as encoding from './lib/encoding.js'
 import * as awarenessProtocol from './protocols/awareness.js'
 import * as syncProtocol from './protocols/sync.js'
 import * as authProtocol from './protocols/auth.js'
+import * as ID from './utils/ID.js'
 
-export { decoding, encoding, awarenessProtocol, syncProtocol, authProtocol }
+export { decoding, encoding, awarenessProtocol, syncProtocol, authProtocol, ID }
 
 export { Y } from './utils/Y.js'
 export { UndoManager } from './utils/UndoManager.js'
@@ -40,6 +41,8 @@ export { registerStruct } from './utils/structReferences.js'
 export * from './lib/mutex.js'
 
 export * from './provider/websocket'
+
+export { DeleteStore } from './utils/DeleteStore'
 
 // export { createYdbClient } from './provider/ydb/index'
 export { defragmentItemContent } from './utils/defragmentItemContent'

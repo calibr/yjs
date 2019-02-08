@@ -83,11 +83,11 @@ export class Delete {
    * * If created lokally (e.g. when y-array deletes a range of elements),
    *   this struct is broadcasted only (it is already executed)
    */
-  _integrate (y, locallyCreated = false) {
+  _integrate (y, locallyCreated = false, gcChildren = false) {
     if (!locallyCreated) {
       // from remote
       const id = this._targetID
-      deleteItemRange(y, id.user, id.clock, this._length, false)
+      deleteItemRange(y, id.user, id.clock, this._length, gcChildren)
     }
     writeStructToTransaction(y._transaction, this)
   }

@@ -550,6 +550,29 @@
   const createDecoder = buffer => new Decoder(buffer);
 
   /**
+   * Read `len` bytes as an ArrayBuffer.
+   * @function
+   * @param {Decoder} decoder The decoder instance
+   * @param {number} len The length of bytes to read
+   * @return {ArrayBuffer}
+   */
+  const readArrayBuffer = (decoder, len) => {
+    const arrayBuffer = createUint8ArrayFromLen(len);
+    const view = createUint8ArrayFromBuffer(decoder.arr.buffer, decoder.pos, len);
+    arrayBuffer.set(view);
+    decoder.pos += len;
+    return arrayBuffer.buffer
+  };
+
+  /**
+   * Read variable length payload as ArrayBuffer
+   * @function
+   * @param {Decoder} decoder
+   * @return {ArrayBuffer}
+   */
+  const readPayload = decoder => readArrayBuffer(decoder, readVarUint(decoder));
+
+  /**
    * Read one byte as unsigned integer.
    * @function
    * @param {Decoder} decoder The decoder instance
@@ -825,6 +848,16 @@
     encoder.bufs.push(createUint8ArrayFromArrayBuffer(arrayBuffer));
     encoder.cbuf = createUint8ArrayFromLen(prevBufferLen);
     encoder.cpos = 0;
+  };
+
+  /**
+   * @function
+   * @param {Encoder} encoder
+   * @param {ArrayBuffer} arrayBuffer
+   */
+  const writePayload = (encoder, arrayBuffer) => {
+    writeVarUint(encoder, arrayBuffer.byteLength);
+    writeArrayBuffer(encoder, arrayBuffer);
   };
 
   /**
@@ -7117,11 +7150,11 @@
      * * If created lokally (e.g. when y-array deletes a range of elements),
      *   this struct is broadcasted only (it is already executed)
      */
-    _integrate (y, locallyCreated = false) {
+    _integrate (y, locallyCreated = false, gcChildren = false) {
       if (!locallyCreated) {
         // from remote
         const id = this._targetID;
-        deleteItemRange(y, id.user, id.clock, this._length, false);
+        deleteItemRange(y, id.user, id.clock, this._length, gcChildren);
       }
       writeStructToTransaction(y._transaction, this);
     }
@@ -7861,29 +7894,29 @@
       var n = this.findWithUpperBound(id);
       return n !== null && n._id.user === id.user && id.clock < n._id.clock + n.len
     }
-    mark (id, length, gc) {
-      if (length === 0) return
+    mark (id, length$$1, gc) {
+      if (length$$1 === 0) return
       // Step 1. Unmark range
       const leftD = this.findWithUpperBound(createID(id.user, id.clock - 1));
       // Resize left DSNode if necessary
       if (leftD !== null && leftD._id.user === id.user) {
         if (leftD._id.clock < id.clock && id.clock < leftD._id.clock + leftD.len) {
           // node is overlapping. need to resize
-          if (id.clock + length < leftD._id.clock + leftD.len) {
+          if (id.clock + length$$1 < leftD._id.clock + leftD.len) {
             // overlaps new mark range and some more
             // create another DSNode to the right of new mark
-            this.put(new DSNode(createID(id.user, id.clock + length), leftD._id.clock + leftD.len - id.clock - length, leftD.gc));
+            this.put(new DSNode(createID(id.user, id.clock + length$$1), leftD._id.clock + leftD.len - id.clock - length$$1, leftD.gc));
           }
           // resize left DSNode
           leftD.len = id.clock - leftD._id.clock;
         } // Otherwise there is no overlapping
       }
       // Resize right DSNode if necessary
-      const upper = createID(id.user, id.clock + length - 1);
+      const upper = createID(id.user, id.clock + length$$1 - 1);
       const rightD = this.findWithUpperBound(upper);
       if (rightD !== null && rightD._id.user === id.user) {
-        if (rightD._id.clock < id.clock + length && id.clock <= rightD._id.clock && id.clock + length < rightD._id.clock + rightD.len) { // we only consider the case where we resize the node
-          const d = id.clock + length - rightD._id.clock;
+        if (rightD._id.clock < id.clock + length$$1 && id.clock <= rightD._id.clock && id.clock + length$$1 < rightD._id.clock + rightD.len) { // we only consider the case where we resize the node
+          const d = id.clock + length$$1 - rightD._id.clock;
           rightD._id = createID(rightD._id.user, rightD._id.clock + d);
           rightD.len -= d;
         }
@@ -7896,15 +7929,15 @@
       for (let i = deleteNodeIds.length - 1; i >= 0; i--) {
         this.delete(deleteNodeIds[i]);
       }
-      let newMark = new DSNode(id, length, gc);
+      let newMark = new DSNode(id, length$$1, gc);
       // Step 2. Check if we can extend left or right
       if (leftD !== null && leftD._id.user === id.user && leftD._id.clock + leftD.len === id.clock && leftD.gc === gc) {
         // We can extend left
-        leftD.len += length;
+        leftD.len += length$$1;
         newMark = leftD;
       }
-      const rightNext = this.find(createID(id.user, id.clock + length));
-      if (rightNext !== null && rightNext._id.user === id.user && id.clock + length === rightNext._id.clock && gc === rightNext.gc) {
+      const rightNext = this.find(createID(id.user, id.clock + length$$1));
+      if (rightNext !== null && rightNext._id.user === id.user && id.clock + length$$1 === rightNext._id.clock && gc === rightNext.gc) {
         // We can merge newMark and rightNext
         newMark.len += rightNext.len;
         this.delete(rightNext._id);
@@ -7914,11 +7947,156 @@
         this.put(newMark);
       }
     }
-    // TODO: exchange markDeleted for mark()
-    markDeleted (id, length) {
-      this.mark(id, length, false);
-    }
   }
+
+  /**
+   * Stringifies a message-encoded Delete Set.
+   *
+   * @param {decoding.Decoder} decoder
+   * @return {string}
+   */
+  const stringifyDeleteStore = (decoder) => {
+    let str = '';
+    const dsLength = readUint32(decoder);
+    for (let i = 0; i < dsLength; i++) {
+      str += ' -' + readVarUint(decoder) + ':\n'; // decodes user
+      const dvLength = readUint32(decoder);
+      for (let j = 0; j < dvLength; j++) {
+        str += `clock: ${readVarUint(decoder)}, length: ${readVarUint(decoder)}, gc: ${readUint8(decoder) === 1}\n`;
+      }
+    }
+    return str
+  };
+
+  /**
+   * Write the DeleteSet of a shared document to an Encoder.
+   *
+   * @param {encoding.Encoder} encoder
+   * @param {DeleteStore} ds
+   */
+  const writeDeleteStore = (encoder, ds) => {
+    let currentUser = null;
+    let currentLength;
+    let lastLenPos;
+    let numberOfUsers = 0;
+    const laterDSLenPus = length(encoder);
+    writeUint32(encoder, 0);
+    ds.iterate(null, null, n => {
+      const user = n._id.user;
+      const clock = n._id.clock;
+      const len = n.len;
+      const gc = n.gc;
+      if (currentUser !== user) {
+        numberOfUsers++;
+        // a new user was found
+        if (currentUser !== null) { // happens on first iteration
+          setUint32(encoder, lastLenPos, currentLength);
+        }
+        currentUser = user;
+        writeVarUint(encoder, user);
+        // pseudo-fill pos
+        lastLenPos = length(encoder);
+        writeUint32(encoder, 0);
+        currentLength = 0;
+      }
+      writeVarUint(encoder, clock);
+      writeVarUint(encoder, len);
+      writeUint8(encoder, gc ? 1 : 0);
+      currentLength++;
+    });
+    if (currentUser !== null) { // happens on first iteration
+      setUint32(encoder, lastLenPos, currentLength);
+    }
+    setUint32(encoder, laterDSLenPus, numberOfUsers);
+  };
+
+  /**
+   * Read delete set from Decoder and apply it to a shared document.
+   *
+   * @param {decoding.Decoder} decoder
+   * @param {Y} y
+   */
+  const readDeleteStore = (decoder, y) => {
+    const dsLength = readUint32(decoder);
+    for (let i = 0; i < dsLength; i++) {
+      const user = readVarUint(decoder);
+      const dv = [];
+      const dvLength = readUint32(decoder);
+      for (let j = 0; j < dvLength; j++) {
+        const from = readVarUint(decoder);
+        const len = readVarUint(decoder);
+        const gc = readUint8(decoder) === 1;
+        dv.push({from, len, gc});
+      }
+      if (dvLength > 0) {
+        const deletions = [];
+        let pos = 0;
+        let d = dv[pos];
+        y.ds.iterate(createID(user, 0), createID(user, Number.MAX_VALUE), n => {
+          // cases:
+          // 1. d deletes something to the right of n
+          //  => go to next n (break)
+          // 2. d deletes something to the left of n
+          //  => create deletions
+          //  => reset d accordingly
+          //  *)=> if d doesn't delete anything anymore, go to next d (continue)
+          // 3. not 2) and d deletes something that also n deletes
+          //  => reset d so that it doesn't contain n's deletion
+          //  *)=> if d does not delete anything anymore, go to next d (continue)
+          while (d != null) {
+            var diff = 0; // describe the diff of length in 1) and 2)
+            if (n._id.clock + n.len <= d.from) {
+              // 1)
+              break
+            } else if (d.from < n._id.clock) {
+              // 2)
+              // delete maximum the len of d
+              // else delete as much as possible
+              diff = Math.min(n._id.clock - d.from, d.len);
+              // deleteItemRange(y, user, d.from, diff, true)
+              deletions.push([user, d.from, diff]);
+            } else {
+              // 3)
+              diff = n._id.clock + n.len - d.from; // never null (see 1)
+              if (d.gc && !n.gc) {
+                // d marks as gc'd but n does not
+                // then delete either way
+                // deleteItemRange(y, user, d.from, Math.min(diff, d.len), true)
+                deletions.push([user, d.from, Math.min(diff, d.len)]);
+              }
+            }
+            if (d.len <= diff) {
+              // d doesn't delete anything anymore
+              d = dv[++pos];
+            } else {
+              d.from = d.from + diff; // reset pos
+              d.len = d.len - diff; // reset length
+            }
+          }
+        });
+        // TODO: It would be more performant to apply the deletes in the above loop
+        // Adapt the Tree implementation to support delete while iterating
+        for (let i = deletions.length - 1; i >= 0; i--) {
+          const del = deletions[i];
+          const delStruct = new Delete();
+          delStruct._targetID = new ID(del[0], del[1]);
+          delStruct._length = del[2];
+          delStruct._integrate(y, false, true);
+          //deleteItemRange(y, del[0], del[1], del[2], true)
+        }
+        // for the rest.. just apply it
+        for (; pos < dv.length; pos++) {
+          d = dv[pos];
+          const delStruct = new Delete();
+          delStruct._targetID = new ID(user, d.from);
+          delStruct._length = d.len;
+          delStruct._integrate(y, false, true);
+          //deleteItemRange(y, user, d.from, d.len, true)
+          // deletions.push([user, d.from, d.len, d.gc)
+        }
+      }
+    }
+  };
 
   /**
    * @module utils
@@ -8018,11 +8196,43 @@
    */
 
   /**
-   * @typedef {Map<number, number>} StateSet
+   * @typedef {Map<number, number>} StateMap
    */
 
   /**
-   * @private
+   * Read StateMap from Decoder and return as Map
+   *
+   * @param {decoding.Decoder} decoder
+   * @return {StateMap}
+   */
+  const readStateMap = decoder => {
+    const ss = new Map();
+    const ssLength = readUint32(decoder);
+    for (let i = 0; i < ssLength; i++) {
+      const user = readVarUint(decoder);
+      const clock = readVarUint(decoder);
+      ss.set(user, clock);
+    }
+    return ss
+  };
+
+  /**
+   * Write StateMap to Encoder
+   *
+   * @param {encoding.Encoder} encoder
+   * @param {StateMap} state
+   */
+  const writeStateMap = (encoder, state) => {
+    // write as fixed-size number to stay consistent with the other encode functions.
+    // => anytime we write the number of objects that follow, encode as fixed-size number.
+    writeUint32(encoder, state.size);
+    state.forEach((clock, user) => {
+      writeVarUint(encoder, user);
+      writeVarUint(encoder, clock);
+    });
+  };
+
+  /**
    */
   class StateStore {
     constructor (y) {
@@ -8783,7 +8993,7 @@
    */
 
   /**
-   * @typedef {Map<number, number>} StateSet
+   * @typedef {Map<number, number>} StateMap
    */
 
   /**
@@ -8816,182 +9026,6 @@
   const messageYjsUpdate = 2;
 
   /**
-   * Stringifies a message-encoded Delete Set.
-   *
-   * @param {decoding.Decoder} decoder
-   * @return {string}
-   */
-  const stringifyDeleteSet = (decoder) => {
-    let str = '';
-    const dsLength = readUint32(decoder);
-    for (let i = 0; i < dsLength; i++) {
-      str += ' -' + readVarUint(decoder) + ':\n'; // decodes user
-      const dvLength = readUint32(decoder);
-      for (let j = 0; j < dvLength; j++) {
-        str += `clock: ${readVarUint(decoder)}, length: ${readVarUint(decoder)}, gc: ${readUint8(decoder) === 1}\n`;
-      }
-    }
-    return str
-  };
-
-  /**
-   * Write the DeleteSet of a shared document to an Encoder.
-   *
-   * @param {encoding.Encoder} encoder
-   * @param {Y} y
-   */
-  const writeDeleteSet = (encoder, y) => {
-    let currentUser = null;
-    let currentLength;
-    let lastLenPos;
-    let numberOfUsers = 0;
-    const laterDSLenPus = length(encoder);
-    writeUint32(encoder, 0);
-    y.ds.iterate(null, null, n => {
-      const user = n._id.user;
-      const clock = n._id.clock;
-      const len = n.len;
-      const gc = n.gc;
-      if (currentUser !== user) {
-        numberOfUsers++;
-        // a new user was foundimport { StateSet } from '../Store/StateStore.js' // eslint-disable-line
-
-        if (currentUser !== null) { // happens on first iteration
-          setUint32(encoder, lastLenPos, currentLength);
-        }
-        currentUser = user;
-        writeVarUint(encoder, user);
-        // pseudo-fill pos
-        lastLenPos = length(encoder);
-        writeUint32(encoder, 0);
-        currentLength = 0;
-      }
-      writeVarUint(encoder, clock);
-      writeVarUint(encoder, len);
-      writeUint8(encoder, gc ? 1 : 0);
-      currentLength++;
-    });
-    if (currentUser !== null) { // happens on first iteration
-      setUint32(encoder, lastLenPos, currentLength);
-    }
-    setUint32(encoder, laterDSLenPus, numberOfUsers);
-  };
-
-  /**
-   * Read delete set from Decoder and apply it to a shared document.
-   *
-   * @param {decoding.Decoder} decoder
-   * @param {Y} y
-   */
-  const readDeleteSet = (decoder, y) => {
-    const dsLength = readUint32(decoder);
-    for (let i = 0; i < dsLength; i++) {
-      const user = readVarUint(decoder);
-      const dv = [];
-      const dvLength = readUint32(decoder);
-      for (let j = 0; j < dvLength; j++) {
-        const from = readVarUint(decoder);
-        const len = readVarUint(decoder);
-        const gc = readUint8(decoder) === 1;
-        dv.push({from, len, gc});
-      }
-      if (dvLength > 0) {
-        const deletions = [];
-        let pos = 0;
-        let d = dv[pos];
-        y.ds.iterate(createID(user, 0), createID(user, Number.MAX_VALUE), n => {
-          // cases:
-          // 1. d deletes something to the right of n
-          //  => go to next n (break)
-          // 2. d deletes something to the left of n
-          //  => create deletions
-          //  => reset d accordingly
-          //  *)=> if d doesn't delete anything anymore, go to next d (continue)
-          // 3. not 2) and d deletes something that also n deletes
-          //  => reset d so that it doesn't contain n's deletion
-          //  *)=> if d does not delete anything anymore, go to next d (continue)
-          while (d != null) {
-            var diff = 0; // describe the diff of length in 1) and 2)
-            if (n._id.clock + n.len <= d.from) {
-              // 1)
-              break
-            } else if (d.from < n._id.clock) {
-              // 2)
-              // delete maximum the len of d
-              // else delete as much as possible
-              diff = Math.min(n._id.clock - d.from, d.len);
-              // deleteItemRange(y, user, d.from, diff, true)
-              deletions.push([user, d.from, diff]);
-            } else {
-              // 3)
-              diff = n._id.clock + n.len - d.from; // never null (see 1)
-              if (d.gc && !n.gc) {
-                // d marks as gc'd but n does not
-                // then delete either way
-                // deleteItemRange(y, user, d.from, Math.min(diff, d.len), true)
-                deletions.push([user, d.from, Math.min(diff, d.len)]);
-              }
-            }
-            if (d.len <= diff) {
-              // d doesn't delete anything anymore
-              d = dv[++pos];
-            } else {
-              d.from = d.from + diff; // reset pos
-              d.len = d.len - diff; // reset length
-            }
-          }
-        });
-        // TODO: It would be more performant to apply the deletes in the above loop
-        // Adapt the Tree implementation to support delete while iterating
-        for (let i = deletions.length - 1; i >= 0; i--) {
-          const del = deletions[i];
-          deleteItemRange(y, del[0], del[1], del[2], true);
-        }
-        // for the rest.. just apply it
-        for (; pos < dv.length; pos++) {
-          d = dv[pos];
-          deleteItemRange(y, user, d.from, d.len, true);
-          // deletions.push([user, d.from, d.len, d.gc)
-        }
-      }
-    }
-  };
-
-  /**
-   * Write StateSet to Encoder
-   *
-   * @param {encoding.Encoder} encoder
-   * @param {Y} y
-   */
-  const writeStateSet = (encoder, y) => {
-    const state = y.ss.state;
-    // write as fixed-size number to stay consistent with the other encode functions.
-    // => anytime we write the number of objects that follow, encode as fixed-size number.
-    writeUint32(encoder, state.size);
-    state.forEach((clock, user) => {
-      writeVarUint(encoder, user);
-      writeVarUint(encoder, clock);
-    });
-  };
-
-  /**
-   * Read StateSet from Decoder and return as Map
-   *
-   * @param {decoding.Decoder} decoder
-   * @return {StateSet}
-   */
-  const readStateSet = decoder => {
-    const ss = new Map();
-    const ssLength = readUint32(decoder);
-    for (let i = 0; i < ssLength; i++) {
-      const user = readVarUint(decoder);
-      const clock = readVarUint(decoder);
-      ss.set(user, clock);
-    }
-    return ss
-  };
-
-  /**
    * @param {decoding.Decoder} decoder
    * @param {Y} y
    * @return {string}
@@ -9019,7 +9053,7 @@
    *
    * @param {encoding.Encoder} encoder
    * @param {Y} y
-   * @param {StateSet} ss State Set received from a remote client. Maps from client id to number of created operations by client id.
+   * @param {StateMap} ss State Set received from a remote client. Maps from client id to number of created operations by client id.
    */
   const writeStructs = (encoder, y, ss) => {
     const lenPos = length(encoder);
@@ -9085,7 +9119,7 @@
    */
   const writeSyncStep1 = (encoder, y) => {
     writeVarUint(encoder, messageYjsSyncStep1);
-    writeStateSet(encoder, y);
+    writeStateMap(encoder, y.ss.state);
   };
 
   /**
@@ -9096,7 +9130,7 @@
   const writeSyncStep2 = (encoder, y, ss) => {
     writeVarUint(encoder, messageYjsSyncStep2);
     writeStructs(encoder, y, ss);
-    writeDeleteSet(encoder, y);
+    writeDeleteStore(encoder, y.ds);
   };
 
   /**
@@ -9107,7 +9141,7 @@
    * @param {Y} y
    */
   const readSyncStep1 = (decoder, encoder, y) =>
-    writeSyncStep2(encoder, y, readStateSet(decoder));
+    writeSyncStep2(encoder, y, readStateMap(decoder));
 
   /**
    * @param {decoding.Decoder} decoder
@@ -9120,19 +9154,19 @@
     str += stringifyStructs(decoder, y);
     // write DS to string
     str += ' + Delete Set:\n';
-    str += stringifyDeleteSet(decoder);
+    str += stringifyDeleteStore(decoder);
     return str
   };
 
   /**
-   * Read and apply Structs and then DeleteSet to a y instance.
+   * Read and apply Structs and then DeleteStore to a y instance.
    *
    * @param {decoding.Decoder} decoder
    * @param {Y} y
    */
   const readSyncStep2 = (decoder, y) => {
     readStructs(decoder, y);
-    readDeleteSet(decoder, y);
+    readDeleteStore(decoder, y);
   };
 
   /**
@@ -9248,7 +9282,7 @@
     importModel (decoder) {
       this.transact(() => {
         integrateRemoteStructs(decoder, this);
-        readDeleteSet(decoder, this);
+        readDeleteStore(decoder, this);
       });
     }
 
@@ -9260,7 +9294,7 @@
     exportModel () {
       const encoder = createEncoder();
       writeStructs(encoder, this, new Map());
-      writeDeleteSet(encoder, this);
+      writeDeleteStore(encoder, this.ds);
       return toBuffer(encoder)
     }
     _beforeChange () {}
@@ -9363,7 +9397,7 @@
      *
      * @param {String} name
      * @param {Function} TypeConstructor The constructor of the type definition
-     * @returns {Type} The created type. Constructed with TypeConstructor
+     * @returns {any} The created type. Constructed with TypeConstructor
      */
     define (name, TypeConstructor) {
       let id = createRootID(name, TypeConstructor);
@@ -9383,6 +9417,7 @@
      * This returns the same value as `y.share[name]`
      *
      * @param {String} name The typename
+     * @return {any}
      */
     get (name) {
       return this._map.get(name)
@@ -9631,6 +9666,54 @@
   }
 
   /**
+   * @module structs
+   */
+
+  class ItemBinary extends Item {
+    constructor () {
+      super();
+      this._content = null;
+    }
+    _copy () {
+      let struct = super._copy();
+      struct._content = this._content;
+      return struct
+    }
+    /**
+     * @param {Y} y
+     * @param {decoding.Decoder} decoder
+     */
+    _fromBinary (y, decoder) {
+      const missing = super._fromBinary(y, decoder);
+      this._content = readPayload(decoder);
+      return missing
+    }
+    /**
+     * @param {encoding.Encoder} encoder
+     */
+    _toBinary (encoder) {
+      super._toBinary(encoder);
+      writePayload(encoder, this._content);
+    }
+    /**
+     * Transform this YXml Type to a readable format.
+     * Useful for logging as all Items and Delete implement this method.
+     *
+     * @private
+     */
+    _logString () {
+      return logItemHelper('ItemBinary', this)
+    }
+  }
+
+  /**
+   *
+   * @param {Item} item
+   * @param {import("../protocols/history").HistorySnapshot} [snapshot]
+   */
+  const isVisible = (item, snapshot) => snapshot === undefined ? !item._deleted : (snapshot.sm.has(item._id.user) && snapshot.sm.get(item._id.user) > item._id.clock && !snapshot.ds.isDeleted(item._id));
+
+  /**
    * @module types
    */
 
@@ -9713,6 +9796,7 @@
      * Returns the i-th element from a YArray.
      *
      * @param {number} index The index of the element to return from the YArray
+     * @return {any}
      */
     get (index) {
       let n = this._start;
@@ -9736,10 +9820,11 @@
     /**
      * Transforms this YArray to a JavaScript Array.
      *
+     * @param {Object} [snapshot]
      * @return {Array}
      */
-    toArray () {
-      return this.map(c => c)
+    toArray (snapshot) {
+      return this.map(c => c, snapshot)
     }
 
     /**
@@ -9761,14 +9846,15 @@
      * element of this YArray.
      *
      * @param {Function} f Function that produces an element of the new Array
+     * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
      * @return {Array} A new array with each element being the result of the
      *                 callback function
      */
-    map (f) {
+    map (f, snapshot) {
       const res = [];
       this.forEach((c, i) => {
         res.push(f(c, i, this));
-      });
+      }, snapshot);
       return res
     }
 
@@ -9776,14 +9862,17 @@
      * Executes a provided function on once on overy element of this YArray.
      *
      * @param {Function} f A function to execute on every element of this YArray.
+     * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
      */
-    forEach (f) {
+    forEach (f, snapshot) {
       let index = 0;
       let n = this._start;
       while (n !== null) {
-        if (!n._deleted && n._countable) {
+        if (isVisible(n, snapshot) && n._countable) {
           if (n instanceof Type) {
             f(n, index++, this);
+          } else if (n.constructor === ItemBinary) {
+            f(n._content, index++, this);
           } else {
             const content = n._content;
             const contentLen = content.length;
@@ -9813,6 +9902,7 @@
           let content;
           if (this._item instanceof Type) {
             content = this._item;
+            this._item = this._item._right;
           } else {
             content = this._item._content[this._itemElement++];
           }
@@ -9863,7 +9953,7 @@
      *
      * @private
      * @param {Item} left The element container to use as a reference.
-     * @param {Array} content The Array of content to insert (see {@see insert})
+     * @param {Array<number|string|Object|ArrayBuffer>} content The Array of content to insert (see {@see insert})
      */
     insertAfter (left, content) {
       this._transact(y => {
@@ -9900,6 +9990,29 @@
               left._right = c;
             }
             left = c;
+          } else if (c.constructor === ArrayBuffer) {
+            if (prevJsonIns !== null) {
+              if (y !== null) {
+                prevJsonIns._integrate(y);
+              }
+              left = prevJsonIns;
+              prevJsonIns = null;
+            }
+            const itemBinary = new ItemBinary();
+            itemBinary._origin = left;
+            itemBinary._left = left;
+            itemBinary._right = right;
+            itemBinary._right_origin = right;
+            itemBinary._parent = this;
+            itemBinary._content = c;
+            if (y !== null) {
+              itemBinary._integrate(y);
+            } else if (left === null) {
+              this._start = itemBinary;
+            } else {
+              left._right = itemBinary;
+            }
+            left = itemBinary;
           } else {
             if (prevJsonIns === null) {
               prevJsonIns = new ItemJSON();
@@ -9918,6 +10031,8 @@
             prevJsonIns._integrate(y);
           } else if (prevJsonIns._left === null) {
             this._start = prevJsonIns;
+          } else {
+            left._right = prevJsonIns;
           }
         }
       });
@@ -9938,7 +10053,7 @@
      *  yarray.insert(2, [1, 2])
      *
      * @param {number} index The index to insert content at.
-     * @param {Array} content The array of content
+     * @param {Array<number|string|ArrayBuffer|Type>} content The array of content
      */
     insert (index, content) {
       this._transact(() => {
@@ -9971,7 +10086,7 @@
     /**
      * Appends content to this YArray.
      *
-     * @param {Array} content Array of content to append.
+     * @param {Array<number|string|ArrayBuffer|Type>} content Array of content to append.
      */
     push (content) {
       let n = this._start;
@@ -10045,6 +10160,8 @@
             } else {
               res = item.toString();
             }
+          } else if (item.constructor === ItemBinary) {
+            res = item._content;
           } else {
             res = item._content[0];
           }
@@ -10057,15 +10174,24 @@
     /**
      * Returns the keys for each element in the YMap Type.
      *
+     * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
      * @return {Array}
      */
-    keys () {
+    keys (snapshot) {
       // TODO: Should return either Iterator or Set!
       let keys = [];
-      for (let [key, value] of this._map) {
-        if (!value._deleted) {
-          keys.push(key);
+      if (snapshot === undefined) {
+        for (let [key, value] of this._map) {
+          if (value._deleted) {
+            keys.push(key);
+          }
         }
+      } else {
+        this._map.forEach((_, key) => {
+          if (YMap.prototype.has.call(this, key, snapshot)) {
+            keys.push(key);
+          }
+        });
       }
       return keys
     }
@@ -10088,7 +10214,7 @@
      * Adds or updates an element with a specified key and value.
      *
      * @param {string} key The key of the element to add to this YMap
-     * @param {Object | string | number | Type} value The value of the element to add
+     * @param {Object | string | number | Type | ArrayBuffer } value The value of the element to add
      */
     set (key, value) {
       this._transact(y => {
@@ -10112,6 +10238,9 @@
           value = v;
         } else if (value instanceof Item) {
           v = value;
+        } else if (value.constructor === ArrayBuffer) {
+          v = new ItemBinary();
+          v._content = value;
         } else {
           v = new ItemJSON();
           v._content = [value];
@@ -10133,16 +10262,27 @@
      * Returns a specified element from this YMap.
      *
      * @param {string} key The key of the element to return.
+     * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
      */
-    get (key) {
+    get (key, snapshot) {
       let v = this._map.get(key);
-      if (v === undefined || v._deleted) {
+      if (v === undefined) {
         return undefined
       }
-      if (v instanceof Type) {
-        return v
-      } else {
-        return v._content[v._content.length - 1]
+      if (snapshot !== undefined) {
+        // iterate until found element that exists
+        while (!snapshot.sm.has(v._id.user) || v._id.clock >= snapshot.sm.get(v._id.user)) {
+          v = v._right;
+        }
+      }
+      if (isVisible(v, snapshot)) {
+        if (v instanceof Type) {
+          return v
+        } else if (v.constructor === ItemBinary) {
+          return v._content
+        } else {
+          return v._content[v._content.length - 1]
+        }
       }
     }
 
@@ -10150,14 +10290,20 @@
      * Returns a boolean indicating whether the specified key exists or not.
      *
      * @param {string} key The key to test.
+     * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
      */
-    has (key) {
+    has (key, snapshot) {
       let v = this._map.get(key);
-      if (v === undefined || v._deleted) {
+      if (v === undefined) {
         return false
-      } else {
-        return true
       }
+      if (snapshot !== undefined) {
+        // iterate until found element that exists
+        while (!snapshot.sm.has(v._id.user) || v._id.clock >= snapshot.sm.get(v._id.user)) {
+          v = v._right;
+        }
+      }
+      return isVisible(v, snapshot)
     }
 
     /**
@@ -10735,11 +10881,13 @@
     /**
      * Returns the Delta representation of this YText type.
      *
+     * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
+     * @param {import('../protocols/history.js').HistorySnapshot} [prevSnapshot]
      * @return {Delta} The Delta representation of this type.
      *
      * @public
      */
-    toDelta () {
+    toDelta (snapshot, prevSnapshot) {
       let ops = [];
       let currentAttributes = new Map();
       let str = '';
@@ -10765,9 +10913,24 @@
         }
       }
       while (n !== null) {
-        if (!n._deleted) {
+        if (isVisible(n, snapshot) || (prevSnapshot !== undefined && isVisible(n, prevSnapshot))) {
           switch (n.constructor) {
             case ItemString:
+              const cur = currentAttributes.get('ychange');
+              if (snapshot !== undefined && !isVisible(n, snapshot)) {
+                if (cur === undefined || cur.user !== n._id.user || cur.state !== 'removed') {
+                  packStr();
+                  currentAttributes.set('ychange', { user: n._id.user, state: 'removed' });
+                }
+              } else if (prevSnapshot !== undefined && !isVisible(n, prevSnapshot)) {
+                if (cur === undefined || cur.user !== n._id.user || cur.state !== 'added') {
+                  packStr();
+                  currentAttributes.set('ychange', { user: n._id.user, state: 'added' });
+                }
+              } else if (cur !== undefined) {
+                packStr();
+                currentAttributes.delete('ychange');
+              }
               str += n._content;
               break
             case ItemEmbed:
@@ -11502,27 +11665,35 @@
      *
      * @param {String} attributeName The attribute name that identifies the
      *                               queried value.
+     * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
      * @return {String} The queried attribute value.
      *
      * @public
      */
-    getAttribute (attributeName) {
-      return YMap.prototype.get.call(this, attributeName)
+    getAttribute (attributeName, snapshot) {
+      return YMap.prototype.get.call(this, attributeName, snapshot)
     }
 
     /**
      * Returns all attribute name/value pairs in a JSON Object.
      *
+     * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
      * @return {Object} A JSON Object that describes the attributes.
      *
      * @public
      */
-    getAttributes () {
+    getAttributes (snapshot) {
       const obj = {};
-      for (let [key, value] of this._map) {
-        if (!value._deleted) {
-          obj[key] = value._content[0];
+      if (snapshot === undefined) {
+        for (let [key, value] of this._map) {
+          if (!value._deleted) {
+            obj[key] = value._content[0];
+          }
         }
+      } else {
+        YMap.prototype.keys.call(this, snapshot).forEach(key => {
+          obj[key] = YMap.prototype.get.call(this, key, snapshot);
+        });
       }
       return obj
     }
@@ -12617,6 +12788,7 @@
   registerStruct(10, YXmlText);
   registerStruct(11, YXmlHook);
   registerStruct(12, ItemEmbed);
+  registerStruct(13, ItemBinary);
 
   var commonjsGlobal$1 = typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
@@ -24636,6 +24808,22 @@
     });
     t.assert(event.target === array0, '"target" property is set correctly');
     await compareUsers(t, users);
+  });
+
+  test('should correctly iterate an array containing types', async function iterate1 (t) {
+    const y = new Y();
+    const arr = y.define('arr', YArray);
+    const numItems = 10;
+    for(let i = 0; i < numItems; i++) {
+      const map = new YMap();
+      map.set('value', i);
+      arr.push([map]);
+    }
+    let cnt = 0;
+    for(let item of arr) {
+      t.assert(item.get('value') === cnt++, 'value is correct');
+    }
+    y.destroy();
   });
 
   var _uniqueNumber = 0;
@@ -36979,35 +37167,70 @@
    * @return {Plugin} Returns a prosemirror plugin that binds to this type
    */
   const prosemirrorPlugin = yXmlFragment => {
-    const pluginState = {
-      type: yXmlFragment,
-      y: yXmlFragment._y,
-      binding: null
-    };
     let changedInitialContent = false;
     const plugin = new dist_8$2({
+      props: {
+        editable: (state) => prosemirrorPluginKey.getState(state).snapshot == null
+      },
       key: prosemirrorPluginKey,
       state: {
         init: (initargs, state) => {
-          return pluginState
+          return {
+            type: yXmlFragment,
+            y: yXmlFragment._y,
+            binding: null,
+            snapshot: null,
+            isChangeOrigin: false
+          }
         },
         apply: (tr, pluginState) => {
-          // update Yjs state when apply is called. We need to do this here to compute the correct cursor decorations with the cursor plugin
-          if (pluginState.binding !== null && (changedInitialContent || tr.doc.content.size > 4)) {
-            changedInitialContent = true;
-            pluginState.binding._prosemirrorChanged(tr.doc);
+          const change = tr.getMeta(prosemirrorPluginKey);
+          if (change !== undefined) {
+            pluginState = Object.assign({}, pluginState);
+            for (let key in change) {
+              pluginState[key] = change[key];
+            }
+          }
+          // always set isChangeOrigin. If undefined, this is not change origin.
+          pluginState.isChangeOrigin = change !== undefined && !!change.isChangeOrigin;
+          if (pluginState.binding !== null) {
+            if (change !== undefined && change.snapshot !== undefined) {
+              // snapshot changed, rerender next
+              setTimeout(() => {
+                if (change.restore == null) {
+                  pluginState.binding._renderSnapshot(change.snapshot, change.prevSnapshot);
+                } else {
+                  pluginState.binding._renderSnapshot(change.snapshot, change.snapshot);
+                  // reset to current prosemirror state
+                  delete pluginState.restore;
+                  delete pluginState.snapshot;
+                  delete pluginState.prevSnapshot;
+                  pluginState.binding._prosemirrorChanged(pluginState.binding.prosemirrorView.state.doc);
+                }
+              }, 0);
+            } else if (pluginState.snapshot == null) {
+              // only apply if no snapshot active
+              // update Yjs state when apply is called. We need to do this here to compute the correct cursor decorations with the cursor plugin
+              if (changedInitialContent || tr.doc.content.size > 4) {
+                changedInitialContent = true;
+                pluginState.binding._prosemirrorChanged(tr.doc);
+              }
+            }
           }
           return pluginState
         }
       },
       view: view => {
         const binding = new ProsemirrorBinding(yXmlFragment, view);
-        pluginState.binding = binding;
+        view.dispatch(view.state.tr.setMeta(prosemirrorPluginKey, { binding }));
         return {
           update: () => {
-            if (changedInitialContent || view.state.doc.content.size > 4) {
-              changedInitialContent = true;
-              binding._prosemirrorChanged(view.state.doc);
+            const pluginState = plugin.getState(view.state);
+            if (pluginState.snapshot == null) {
+              if (changedInitialContent || view.state.doc.content.size > 4) {
+                changedInitialContent = true;
+                binding._prosemirrorChanged(view.state.doc);
+              }
             }
           },
           destroy: () => {
@@ -37040,7 +37263,14 @@
         const y = ystate.y;
         const awareness = y.getAwarenessInfo();
         const decorations = [];
+        if (ystate.snapshot != null) {
+          // do not render cursors while snapshot is active
+          return
+        }
         awareness.forEach((aw, userID) => {
+          if (userID === y.userID) {
+            return
+          }
           if (aw.cursor != null) {
             let user = aw.user || {};
             if (user.color == null) {
@@ -37082,7 +37312,7 @@
       };
       const updateCursorInfo = () => {
         const current = y.getLocalAwarenessInfo();
-        if (view.hasFocus()) {
+        if (view.hasFocus() && ystate.binding !== null) {
           const anchor = absolutePositionToRelativePosition(view.state.selection.anchor, ystate.type, ystate.binding.mapping);
           const head = absolutePositionToRelativePosition(view.state.selection.head, ystate.type, ystate.binding.mapping);
           if (current.cursor == null || !equal(current.cursor.anchor, anchor) || !equal(current.cursor.head, head)) {
@@ -37249,8 +37479,31 @@
       });
       yXmlFragment.observeDeep(this._observeFunction);
     }
+    _forceRerender () {
+      this.mapping = new Map();
+      this.mux(() => {
+        const fragmentContent = this.type.toArray().map(t => createNodeFromYElement(t, this.prosemirrorView.state.schema, this.mapping)).filter(n => n !== null);
+        const tr = this.prosemirrorView.state.tr.replace(0, this.prosemirrorView.state.doc.content.size, new dist_5(new dist_4(fragmentContent), 0, 0));
+        this.prosemirrorView.dispatch(tr);
+      });
+    }
+    /**
+     *
+     * @param {*} snapshot
+     * @param {*} prevSnapshot
+     */
+    _renderSnapshot (snapshot, prevSnapshot) {
+      // clear mapping because we are going to rerender
+      this.mapping = new Map();
+      this.mux(() => {
+        const fragmentContent = this.type.toArray({ sm: snapshot.sm, ds: prevSnapshot.ds}).map(t => createNodeFromYElement(t, this.prosemirrorView.state.schema, new Map(), snapshot, prevSnapshot)).filter(n => n !== null);
+        const tr = this.prosemirrorView.state.tr.replace(0, this.prosemirrorView.state.doc.content.size, new dist_5(new dist_4(fragmentContent), 0, 0));
+        this.prosemirrorView.dispatch(tr);
+      });
+    }
     _typeChanged (events, transaction) {
-      if (events.length === 0) {
+      if (events.length === 0 || prosemirrorPluginKey.getState(this.prosemirrorView.state).snapshot != null) {
+        // drop out if snapshot is active
         return
       }
       console.info('new types:', transaction.newTypes.size, 'deleted types:', transaction.deletedStructs.size, transaction.newTypes, transaction.deletedStructs);
@@ -37260,16 +37513,17 @@
         transaction.changedTypes.forEach(delStruct);
         transaction.changedParentTypes.forEach(delStruct);
         const fragmentContent = this.type.toArray().map(t => createNodeIfNotExists(t, this.prosemirrorView.state.schema, this.mapping)).filter(n => n !== null);
-        const tr = this.prosemirrorView.state.tr.replace(0, this.prosemirrorView.state.doc.content.size, new dist_5(new dist_4(fragmentContent), 0, 0));
+        let tr = this.prosemirrorView.state.tr.replace(0, this.prosemirrorView.state.doc.content.size, new dist_5(new dist_4(fragmentContent), 0, 0));
         const relSel = this._relSelection;
         if (relSel !== null && relSel.anchor !== null && relSel.head !== null) {
           const anchor = relativePositionToAbsolutePosition(this.type, relSel.anchor, this.mapping);
           const head = relativePositionToAbsolutePosition(this.type, relSel.head, this.mapping);
           if (anchor !== null && head !== null) {
-            tr.setSelection(dist_3$2.create(tr.doc, anchor, head));
+            tr = tr.setSelection(dist_3$2.create(tr.doc, anchor, head));
           }
         }
-        this.prosemirrorView.updateState(this.prosemirrorView.state.apply(tr));
+        tr = tr.setMeta(prosemirrorPluginKey, { isChangeOrigin: true });
+        this.prosemirrorView.dispatch(tr);
       });
     }
     _prosemirrorChanged (doc) {
@@ -37283,16 +37537,18 @@
   }
 
   /**
-   * @privateMapping
+   * @private
    * @param {YXmlElement} el
    * @param {PModel.Schema} schema
    * @param {ProsemirrorMapping} mapping
+   * @param {HistorySnapshot} [snapshot]
+   * @param {HistorySnapshot} [prevSnapshot]
    * @return {PModel.Node}
    */
-  const createNodeIfNotExists = (el, schema, mapping) => {
+  const createNodeIfNotExists = (el, schema, mapping, snapshot, prevSnapshot) => {
     const node = mapping.get(el);
     if (node === undefined) {
-      return createNodeFromYElement(el, schema, mapping)
+      return createNodeFromYElement(el, schema, mapping, snapshot, prevSnapshot)
     }
     return node
   };
@@ -37302,18 +37558,31 @@
    * @param {YXmlElement} el
    * @param {PModel.Schema} schema
    * @param {ProsemirrorMapping} mapping
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
+   * @param {import('../protocols/history.js').HistorySnapshot} [prevSnapshot]
    * @return {PModel.Node | null} Returns node if node could be created. Otherwise it deletes the yjs type and returns null
    */
-  const createNodeFromYElement = (el, schema, mapping) => {
+  const createNodeFromYElement = (el, schema, mapping, snapshot, prevSnapshot) => {
+    let _snapshot = snapshot;
+    let _prevSnapshot = prevSnapshot;
+    if (snapshot !== undefined && prevSnapshot !== undefined) {
+      if (!isVisible(el, snapshot)) {
+        // if this element is already rendered as deleted (ychange), then do not render children as deleted
+        _snapshot = {sm: snapshot.sm, ds: prevSnapshot.ds};
+        _prevSnapshot = _snapshot;
+      } else if (!isVisible(el, prevSnapshot)) {
+        _prevSnapshot = _snapshot;
+      }
+    }
     const children = [];
-    el.toArray().forEach(type => {
+    const createChildren = type => {
       if (type.constructor === YXmlElement) {
-        const n = createNodeIfNotExists(type, schema, mapping);
+        const n = createNodeIfNotExists(type, schema, mapping, _snapshot, _prevSnapshot);
         if (n !== null) {
           children.push(n);
         }
       } else {
-        const ns = createTextNodesFromYText(type, schema, mapping);
+        const ns = createTextNodesFromYText(type, schema, mapping, _snapshot, _prevSnapshot);
         if (ns !== null) {
           ns.forEach(textchild => {
             if (textchild !== null) {
@@ -37322,16 +37591,31 @@
           });
         }
       }
-    });
+    };
+    if (snapshot === undefined || prevSnapshot === undefined) {
+      el.toArray().forEach(createChildren);
+    } else {
+      el.toArray({sm: snapshot.sm, ds: prevSnapshot.ds}).forEach(createChildren);
+    }
     let node;
     try {
-      node = schema.node(el.nodeName.toLowerCase(), el.getAttributes(), children);
+      const attrs = el.getAttributes(_snapshot);
+      if (snapshot !== undefined) {
+        if (!isVisible(el, snapshot)) {
+          attrs.ychange = { user: el._id.user, state: 'removed' };
+        } else if (!isVisible(el, prevSnapshot)) {
+          attrs.ychange = { user: el._id.user, state: 'added' };
+        }
+      }
+      node = schema.node(el.nodeName.toLowerCase(), attrs, children);
     } catch (e) {
       // an error occured while creating the node. This is probably a result because of a concurrent action.
-      // delete the node and do not push to children
+      // ignore the node while rendering
+      /* do not delete anymore
       el._y.transact(() => {
-        el._delete(el._y, true);
-      });
+        el._delete(el._y, true)
+      })
+      */
       return null
     }
     mapping.set(el, node);
@@ -37343,11 +37627,13 @@
    * @param {YText} text
    * @param {PModel.Schema} schema
    * @param {ProsemirrorMapping} mapping
+   * @param {HistorySnapshot} [snapshot]
+   * @param {HistorySnapshot} [prevSnapshot]
    * @return {Array<PModel.Node>}
    */
-  const createTextNodesFromYText = (text, schema, mapping) => {
+  const createTextNodesFromYText = (text, schema, mapping, snapshot, prevSnapshot) => {
     const nodes = [];
-    const deltas = text.toDelta();
+    const deltas = text.toDelta(snapshot, prevSnapshot);
     try {
       for (let i = 0; i < deltas.length; i++) {
         const delta = deltas[i];
@@ -37361,9 +37647,11 @@
         mapping.set(text, nodes[0]); // only map to first child, all following children are also considered bound to this type
       }
     } catch (e) {
+      /*
       text._y.transact(() => {
-        text._delete(text._y, true);
-      });
+        text._delete(text._y, true)
+      })
+      */
       return null
     }
     return nodes
@@ -37380,13 +37668,17 @@
     if (node.isText) {
       type = new YText();
       const attrs = {};
-      node.marks.forEach(mark => { attrs[mark.type.name] = mark.attrs; });
+      node.marks.forEach(mark => {
+        if (mark.type.name !== 'ychange') {
+          attrs[mark.type.name] = mark.attrs;
+        }
+      });
       type.insert(0, node.text, attrs);
     } else {
       type = new YXmlElement(node.type.name);
       for (let key in node.attrs) {
         const val = node.attrs[key];
-        if (val !== null) {
+        if (val !== null && key !== 'ychange') {
           type.setAttribute(key, val);
         }
       }
@@ -37405,7 +37697,9 @@
     let eq = keys$$1.length === Object.keys(yattrs).filter(key => yattrs[key] === null).length;
     for (let i = 0; i < keys$$1.length && eq; i++) {
       const key = keys$$1[i];
-      eq = pattrs[key] === yattrs[key];
+      const l = pattrs[key];
+      const r = yattrs[key];
+      eq = key === 'ychange' || l === r || (typeof l === 'object' && typeof r === 'object' && equalAttrs(l, r));
     }
     return eq
   };
@@ -37469,7 +37763,7 @@
       const pAttrs = pContent.attrs;
       for (let key in pAttrs) {
         if (pAttrs[key] !== null) {
-          if (yDomAttrs[key] !== pAttrs[key]) {
+          if (yDomAttrs[key] !== pAttrs[key] && key !== 'ychange') {
             yDomFragment.setAttribute(key, pAttrs[key]);
           }
         } else {
@@ -37525,8 +37819,23 @@
         const rightP = pContent.child(pChildCnt - right - 1);
         if (leftY.constructor === YText && leftP.isText) {
           if (!equalYTextPText(leftY, leftP)) {
-            yDomFragment.delete(left, 1);
-            yDomFragment.insert(left, [createTypeFromNode(leftP, mapping)]);
+            // try to apply diff. Only if attrs don't match, delete insert
+            // TODO: use a single ytext to hold all following Prosemirror Text nodes
+            const pattrs = {};
+            leftP.marks.forEach(mark => {
+              if (mark.type.name !== 'ychange') {
+                pattrs[mark.type.name] = mark.attrs;
+              }
+            });
+            const delta = leftY.toDelta();
+            if (delta.length === 1 && delta[0].insert && equalAttrs(pattrs, delta[0].attributes || {})) {
+              const diff = simpleDiff(delta[0].insert, leftP.text);
+              leftY.delete(diff.pos, diff.remove);
+              leftY.insert(diff.pos, diff.insert);
+            } else {
+              yDomFragment.delete(left, 1);
+              yDomFragment.insert(left, [createTypeFromNode(leftP, mapping)]);
+            }
           }
           left += 1;
         } else {

@@ -1,6 +1,6 @@
 {
   "name": "yjs",
-  "version": "13.0.0-76",
+  "version": "13.0.0-78",
   "description": "A ",
   "main": "./build/yjs.js",
   "module": "./index.js'",
@@ -97,7 +97,8 @@
     "rollup-watch": "^3.2.2",
     "standard": "^11.0.1",
     "tui-jsdoc-template": "^1.2.2",
-    "codemirror": "^5.42.0"
+    "codemirror": "^5.42.0",
+    "crel": "^3.1.0"
   },
   "optionalDependencies": {
     "level": "^4.0.0",

@@ -797,11 +797,11 @@ class Delete {
    * * If created lokally (e.g. when y-array deletes a range of elements),
    *   this struct is broadcasted only (it is already executed)
    */
-  _integrate (y, locallyCreated = false) {
+  _integrate (y, locallyCreated = false, gcChildren = false) {
     if (!locallyCreated) {
       // from remote
       const id = this._targetID;
-      deleteItemRange(y, id.user, id.clock, this._length, false);
+      deleteItemRange(y, id.user, id.clock, this._length, gcChildren);
     }
     writeStructToTransaction(y._transaction, this);
   }
@@ -2010,29 +2010,29 @@ class DeleteStore extends Tree {
     var n = this.findWithUpperBound(id);
     return n !== null && n._id.user === id.user && id.clock < n._id.clock + n.len
   }
-  mark (id, length, gc) {
-    if (length === 0) return
+  mark (id, length$$1, gc) {
+    if (length$$1 === 0) return
     // Step 1. Unmark range
     const leftD = this.findWithUpperBound(createID(id.user, id.clock - 1));
     // Resize left DSNode if necessary
     if (leftD !== null && leftD._id.user === id.user) {
       if (leftD._id.clock < id.clock && id.clock < leftD._id.clock + leftD.len) {
         // node is overlapping. need to resize
-        if (id.clock + length < leftD._id.clock + leftD.len) {
+        if (id.clock + length$$1 < leftD._id.clock + leftD.len) {
           // overlaps new mark range and some more
           // create another DSNode to the right of new mark
-          this.put(new DSNode(createID(id.user, id.clock + length), leftD._id.clock + leftD.len - id.clock - length, leftD.gc));
+          this.put(new DSNode(createID(id.user, id.clock + length$$1), leftD._id.clock + leftD.len - id.clock - length$$1, leftD.gc));
         }
         // resize left DSNode
         leftD.len = id.clock - leftD._id.clock;
       } // Otherwise there is no overlapping
     }
     // Resize right DSNode if necessary
-    const upper = createID(id.user, id.clock + length - 1);
+    const upper = createID(id.user, id.clock + length$$1 - 1);
     const rightD = this.findWithUpperBound(upper);
     if (rightD !== null && rightD._id.user === id.user) {
-      if (rightD._id.clock < id.clock + length && id.clock <= rightD._id.clock && id.clock + length < rightD._id.clock + rightD.len) { // we only consider the case where we resize the node
-        const d = id.clock + length - rightD._id.clock;
+      if (rightD._id.clock < id.clock + length$$1 && id.clock <= rightD._id.clock && id.clock + length$$1 < rightD._id.clock + rightD.len) { // we only consider the case where we resize the node
+        const d = id.clock + length$$1 - rightD._id.clock;
         rightD._id = createID(rightD._id.user, rightD._id.clock + d);
         rightD.len -= d;
       }
@@ -2045,15 +2045,15 @@ class DeleteStore extends Tree {
     for (let i = deleteNodeIds.length - 1; i >= 0; i--) {
       this.delete(deleteNodeIds[i]);
     }
-    let newMark = new DSNode(id, length, gc);
+    let newMark = new DSNode(id, length$$1, gc);
     // Step 2. Check if we can extend left or right
     if (leftD !== null && leftD._id.user === id.user && leftD._id.clock + leftD.len === id.clock && leftD.gc === gc) {
       // We can extend left
-      leftD.len += length;
+      leftD.len += length$$1;
       newMark = leftD;
     }
-    const rightNext = this.find(createID(id.user, id.clock + length));
-    if (rightNext !== null && rightNext._id.user === id.user && id.clock + length === rightNext._id.clock && gc === rightNext.gc) {
+    const rightNext = this.find(createID(id.user, id.clock + length$$1));
+    if (rightNext !== null && rightNext._id.user === id.user && id.clock + length$$1 === rightNext._id.clock && gc === rightNext.gc) {
       // We can merge newMark and rightNext
       newMark.len += rightNext.len;
       this.delete(rightNext._id);
@@ -2063,11 +2063,156 @@ class DeleteStore extends Tree {
       this.put(newMark);
     }
   }
-  // TODO: exchange markDeleted for mark()
-  markDeleted (id, length) {
-    this.mark(id, length, false);
-  }
 }
+
+/**
+ * Stringifies a message-encoded Delete Set.
+ *
+ * @param {decoding.Decoder} decoder
+ * @return {string}
+ */
+const stringifyDeleteStore = (decoder) => {
+  let str = '';
+  const dsLength = readUint32(decoder);
+  for (let i = 0; i < dsLength; i++) {
+    str += ' -' + readVarUint(decoder) + ':\n'; // decodes user
+    const dvLength = readUint32(decoder);
+    for (let j = 0; j < dvLength; j++) {
+      str += `clock: ${readVarUint(decoder)}, length: ${readVarUint(decoder)}, gc: ${readUint8(decoder) === 1}\n`;
+    }
+  }
+  return str
+};
+
+/**
+ * Write the DeleteSet of a shared document to an Encoder.
+ *
+ * @param {encoding.Encoder} encoder
+ * @param {DeleteStore} ds
+ */
+const writeDeleteStore = (encoder, ds) => {
+  let currentUser = null;
+  let currentLength;
+  let lastLenPos;
+  let numberOfUsers = 0;
+  const laterDSLenPus = length(encoder);
+  writeUint32(encoder, 0);
+  ds.iterate(null, null, n => {
+    const user = n._id.user;
+    const clock = n._id.clock;
+    const len = n.len;
+    const gc = n.gc;
+    if (currentUser !== user) {
+      numberOfUsers++;
+      // a new user was found
+      if (currentUser !== null) { // happens on first iteration
+        setUint32(encoder, lastLenPos, currentLength);
+      }
+      currentUser = user;
+      writeVarUint(encoder, user);
+      // pseudo-fill pos
+      lastLenPos = length(encoder);
+      writeUint32(encoder, 0);
+      currentLength = 0;
+    }
+    writeVarUint(encoder, clock);
+    writeVarUint(encoder, len);
+    writeUint8(encoder, gc ? 1 : 0);
+    currentLength++;
+  });
+  if (currentUser !== null) { // happens on first iteration
+    setUint32(encoder, lastLenPos, currentLength);
+  }
+  setUint32(encoder, laterDSLenPus, numberOfUsers);
+};
+
+/**
+ * Read delete set from Decoder and apply it to a shared document.
+ *
+ * @param {decoding.Decoder} decoder
+ * @param {Y} y
+ */
+const readDeleteStore = (decoder, y) => {
+  const dsLength = readUint32(decoder);
+  for (let i = 0; i < dsLength; i++) {
+    const user = readVarUint(decoder);
+    const dv = [];
+    const dvLength = readUint32(decoder);
+    for (let j = 0; j < dvLength; j++) {
+      const from = readVarUint(decoder);
+      const len = readVarUint(decoder);
+      const gc = readUint8(decoder) === 1;
+      dv.push({from, len, gc});
+    }
+    if (dvLength > 0) {
+      const deletions = [];
+      let pos = 0;
+      let d = dv[pos];
+      y.ds.iterate(createID(user, 0), createID(user, Number.MAX_VALUE), n => {
+        // cases:
+        // 1. d deletes something to the right of n
+        //  => go to next n (break)
+        // 2. d deletes something to the left of n
+        //  => create deletions
+        //  => reset d accordingly
+        //  *)=> if d doesn't delete anything anymore, go to next d (continue)
+        // 3. not 2) and d deletes something that also n deletes
+        //  => reset d so that it doesn't contain n's deletion
+        //  *)=> if d does not delete anything anymore, go to next d (continue)
+        while (d != null) {
+          var diff = 0; // describe the diff of length in 1) and 2)
+          if (n._id.clock + n.len <= d.from) {
+            // 1)
+            break
+          } else if (d.from < n._id.clock) {
+            // 2)
+            // delete maximum the len of d
+            // else delete as much as possible
+            diff = Math.min(n._id.clock - d.from, d.len);
+            // deleteItemRange(y, user, d.from, diff, true)
+            deletions.push([user, d.from, diff]);
+          } else {
+            // 3)
+            diff = n._id.clock + n.len - d.from; // never null (see 1)
+            if (d.gc && !n.gc) {
+              // d marks as gc'd but n does not
+              // then delete either way
+              // deleteItemRange(y, user, d.from, Math.min(diff, d.len), true)
+              deletions.push([user, d.from, Math.min(diff, d.len)]);
+            }
+          }
+          if (d.len <= diff) {
+            // d doesn't delete anything anymore
+            d = dv[++pos];
+          } else {
+            d.from = d.from + diff; // reset pos
+            d.len = d.len - diff; // reset length
+          }
+        }
+      });
+      // TODO: It would be more performant to apply the deletes in the above loop
+      // Adapt the Tree implementation to support delete while iterating
+      for (let i = deletions.length - 1; i >= 0; i--) {
+        const del = deletions[i];
+        const delStruct = new Delete();
+        delStruct._targetID = new ID(del[0], del[1]);
+        delStruct._length = del[2];
+        delStruct._integrate(y, false, true);
+        //deleteItemRange(y, del[0], del[1], del[2], true)
+      }
+      // for the rest.. just apply it
+      for (; pos < dv.length; pos++) {
+        d = dv[pos];
+        const delStruct = new Delete();
+        delStruct._targetID = new ID(user, d.from);
+        delStruct._length = d.len;
+        delStruct._integrate(y, false, true);
+        //deleteItemRange(y, user, d.from, d.len, true)
+        // deletions.push([user, d.from, d.len, d.gc)
+      }
+    }
+  }
+};
 
 /**
  * @module utils
@@ -2167,11 +2312,43 @@ class OperationStore extends Tree {
  */
 
 /**
- * @typedef {Map<number, number>} StateSet
+ * @typedef {Map<number, number>} StateMap
  */
 
 /**
- * @private
+ * Read StateMap from Decoder and return as Map
+ *
+ * @param {decoding.Decoder} decoder
+ * @return {StateMap}
+ */
+const readStateMap = decoder => {
+  const ss = new Map();
+  const ssLength = readUint32(decoder);
+  for (let i = 0; i < ssLength; i++) {
+    const user = readVarUint(decoder);
+    const clock = readVarUint(decoder);
+    ss.set(user, clock);
+  }
+  return ss
+};
+
+/**
+ * Write StateMap to Encoder
+ *
+ * @param {encoding.Encoder} encoder
+ * @param {StateMap} state
+ */
+const writeStateMap = (encoder, state) => {
+  // write as fixed-size number to stay consistent with the other encode functions.
+  // => anytime we write the number of objects that follow, encode as fixed-size number.
+  writeUint32(encoder, state.size);
+  state.forEach((clock, user) => {
+    writeVarUint(encoder, user);
+    writeVarUint(encoder, clock);
+  });
+};
+
+/**
  */
 class StateStore {
   constructor (y) {
@@ -2932,7 +3109,7 @@ const integrateRemoteStruct = (decoder, y) => {
  */
 
 /**
- * @typedef {Map<number, number>} StateSet
+ * @typedef {Map<number, number>} StateMap
  */
 
 /**
@@ -2965,196 +3142,6 @@ const messageYjsSyncStep2 = 1;
 const messageYjsUpdate = 2;
 
 /**
- * Stringifies a message-encoded Delete Set.
- *
- * @param {decoding.Decoder} decoder
- * @return {string}
- */
-const stringifyDeleteSet = (decoder) => {
-  let str = '';
-  const dsLength = readUint32(decoder);
-  for (let i = 0; i < dsLength; i++) {
-    str += ' -' + readVarUint(decoder) + ':\n'; // decodes user
-    const dvLength = readUint32(decoder);
-    for (let j = 0; j < dvLength; j++) {
-      str += `clock: ${readVarUint(decoder)}, length: ${readVarUint(decoder)}, gc: ${readUint8(decoder) === 1}\n`;
-    }
-  }
-  return str
-};
-
-/**
- * Write the DeleteSet of a shared document to an Encoder.
- *
- * @param {encoding.Encoder} encoder
- * @param {Y} y
- */
-const writeDeleteSet = (encoder, y) => {
-  let currentUser = null;
-  let currentLength;
-  let lastLenPos;
-  let numberOfUsers = 0;
-  const laterDSLenPus = length(encoder);
-  writeUint32(encoder, 0);
-  y.ds.iterate(null, null, n => {
-    const user = n._id.user;
-    const clock = n._id.clock;
-    const len = n.len;
-    const gc = n.gc;
-    if (currentUser !== user) {
-      numberOfUsers++;
-      // a new user was foundimport { StateSet } from '../Store/StateStore.js' // eslint-disable-line
-
-      if (currentUser !== null) { // happens on first iteration
-        setUint32(encoder, lastLenPos, currentLength);
-      }
-      currentUser = user;
-      writeVarUint(encoder, user);
-      // pseudo-fill pos
-      lastLenPos = length(encoder);
-      writeUint32(encoder, 0);
-      currentLength = 0;
-    }
-    writeVarUint(encoder, clock);
-    writeVarUint(encoder, len);
-    writeUint8(encoder, gc ? 1 : 0);
-    currentLength++;
-  });
-  if (currentUser !== null) { // happens on first iteration
-    setUint32(encoder, lastLenPos, currentLength);
-  }
-  setUint32(encoder, laterDSLenPus, numberOfUsers);
-};
-
-/**
- * Read delete set from Decoder and apply it to a shared document.
- *
- * @param {decoding.Decoder} decoder
- * @param {Y} y
- */
-const readDeleteSet = (decoder, y) => {
-  const dsLength = readUint32(decoder);
-  for (let i = 0; i < dsLength; i++) {
-    const user = readVarUint(decoder);
-    const dv = [];
-    const dvLength = readUint32(decoder);
-    for (let j = 0; j < dvLength; j++) {
-      const from = readVarUint(decoder);
-      const len = readVarUint(decoder);
-      const gc = readUint8(decoder) === 1;
-      dv.push({from, len, gc});
-    }
-    if (dvLength > 0) {
-      const deletions = [];
-      let pos = 0;
-      let d = dv[pos];
-      y.ds.iterate(createID(user, 0), createID(user, Number.MAX_VALUE), n => {
-        // cases:
-        // 1. d deletes something to the right of n
-        //  => go to next n (break)
-        // 2. d deletes something to the left of n
-        //  => create deletions
-        //  => reset d accordingly
-        //  *)=> if d doesn't delete anything anymore, go to next d (continue)
-        // 3. not 2) and d deletes something that also n deletes
-        //  => reset d so that it doesn't contain n's deletion
-        //  *)=> if d does not delete anything anymore, go to next d (continue)
-        while (d != null) {
-          var diff = 0; // describe the diff of length in 1) and 2)
-          if (n._id.clock + n.len <= d.from) {
-            // 1)
-            break
-          } else if (d.from < n._id.clock) {
-            // 2)
-            // delete maximum the len of d
-            // else delete as much as possible
-            diff = Math.min(n._id.clock - d.from, d.len);
-            // deleteItemRange(y, user, d.from, diff, true)
-            deletions.push([user, d.from, diff]);
-          } else {
-            // 3)
-            diff = n._id.clock + n.len - d.from; // never null (see 1)
-            if (d.gc && !n.gc) {
-              // d marks as gc'd but n does not
-              // then delete either way
-              // deleteItemRange(y, user, d.from, Math.min(diff, d.len), true)
-              deletions.push([user, d.from, Math.min(diff, d.len)]);
-            }
-          }
-          if (d.len <= diff) {
-            // d doesn't delete anything anymore
-            d = dv[++pos];
-          } else {
-            d.from = d.from + diff; // reset pos
-            d.len = d.len - diff; // reset length
-          }
-        }
-      });
-      // TODO: It would be more performant to apply the deletes in the above loop
-      // Adapt the Tree implementation to support delete while iterating
-      for (let i = deletions.length - 1; i >= 0; i--) {
-        const del = deletions[i];
-        deleteItemRange(y, del[0], del[1], del[2], true);
-      }
-      // for the rest.. just apply it
-      for (; pos < dv.length; pos++) {
-        d = dv[pos];
-        deleteItemRange(y, user, d.from, d.len, true);
-        // deletions.push([user, d.from, d.len, d.gc)
-      }
-    }
-  }
-};
-
-/**
- * Read a StateSet from Decoder and return it as string.
- *
- * @param {decoding.Decoder} decoder
- * @return {string}
- */
-const stringifyStateSet = decoder => {
-  let s = 'State Set: ';
-  readStateSet(decoder).forEach((clock, user) => {
-    s += `(${user}: ${clock}), `;
-  });
-  return s
-};
-
-/**
- * Write StateSet to Encoder
- *
- * @param {encoding.Encoder} encoder
- * @param {Y} y
- */
-const writeStateSet = (encoder, y) => {
-  const state = y.ss.state;
-  // write as fixed-size number to stay consistent with the other encode functions.
-  // => anytime we write the number of objects that follow, encode as fixed-size number.
-  writeUint32(encoder, state.size);
-  state.forEach((clock, user) => {
-    writeVarUint(encoder, user);
-    writeVarUint(encoder, clock);
-  });
-};
-
-/**
- * Read StateSet from Decoder and return as Map
- *
- * @param {decoding.Decoder} decoder
- * @return {StateSet}
- */
-const readStateSet = decoder => {
-  const ss = new Map();
-  const ssLength = readUint32(decoder);
-  for (let i = 0; i < ssLength; i++) {
-    const user = readVarUint(decoder);
-    const clock = readVarUint(decoder);
-    ss.set(user, clock);
-  }
-  return ss
-};
-
-/**
  * @param {decoding.Decoder} decoder
  * @param {Y} y
  * @return {string}
@@ -3182,7 +3169,7 @@ const stringifyStructs = (decoder, y) => {
  *
  * @param {encoding.Encoder} encoder
  * @param {Y} y
- * @param {StateSet} ss State Set received from a remote client. Maps from client id to number of created operations by client id.
+ * @param {StateMap} ss State Set received from a remote client. Maps from client id to number of created operations by client id.
  */
 const writeStructs = (encoder, y, ss) => {
   const lenPos = length(encoder);
@@ -3248,7 +3235,7 @@ const stringifySyncStep1 = (decoder) => {
  */
 const writeSyncStep1 = (encoder, y) => {
   writeVarUint(encoder, messageYjsSyncStep1);
-  writeStateSet(encoder, y);
+  writeStateMap(encoder, y.ss.state);
 };
 
 /**
@@ -3259,7 +3246,7 @@ const writeSyncStep1 = (encoder, y) => {
 const writeSyncStep2 = (encoder, y, ss) => {
   writeVarUint(encoder, messageYjsSyncStep2);
   writeStructs(encoder, y, ss);
-  writeDeleteSet(encoder, y);
+  writeDeleteStore(encoder, y.ds);
 };
 
 /**
@@ -3270,7 +3257,7 @@ const writeSyncStep2 = (encoder, y, ss) => {
  * @param {Y} y
  */
 const readSyncStep1 = (decoder, encoder, y) =>
-  writeSyncStep2(encoder, y, readStateSet(decoder));
+  writeSyncStep2(encoder, y, readStateMap(decoder));
 
 /**
  * @param {decoding.Decoder} decoder
@@ -3283,19 +3270,19 @@ const stringifySyncStep2 = (decoder, y) => {
   str += stringifyStructs(decoder, y);
   // write DS to string
   str += ' + Delete Set:\n';
-  str += stringifyDeleteSet(decoder);
+  str += stringifyDeleteStore(decoder);
   return str
 };
 
 /**
- * Read and apply Structs and then DeleteSet to a y instance.
+ * Read and apply Structs and then DeleteStore to a y instance.
  *
  * @param {decoding.Decoder} decoder
  * @param {Y} y
  */
 const readSyncStep2 = (decoder, y) => {
   readStructs(decoder, y);
-  readDeleteSet(decoder, y);
+  readDeleteStore(decoder, y);
 };
 
 /**
@@ -3375,12 +3362,6 @@ var sync = /*#__PURE__*/Object.freeze({
   messageYjsSyncStep1: messageYjsSyncStep1,
   messageYjsSyncStep2: messageYjsSyncStep2,
   messageYjsUpdate: messageYjsUpdate,
-  stringifyDeleteSet: stringifyDeleteSet,
-  writeDeleteSet: writeDeleteSet,
-  readDeleteSet: readDeleteSet,
-  stringifyStateSet: stringifyStateSet,
-  writeStateSet: writeStateSet,
-  readStateSet: readStateSet,
   stringifyStructs: stringifyStructs,
   writeStructs: writeStructs,
   readStructs: readStructs,
@@ -3445,7 +3426,7 @@ class Y extends NamedEventHandler {
   importModel (decoder) {
     this.transact(() => {
       integrateRemoteStructs(decoder, this);
-      readDeleteSet(decoder, this);
+      readDeleteStore(decoder, this);
     });
   }
 
@@ -3457,7 +3438,7 @@ class Y extends NamedEventHandler {
   exportModel () {
     const encoder = createEncoder();
     writeStructs(encoder, this, new Map());
-    writeDeleteSet(encoder, this);
+    writeDeleteStore(encoder, this.ds);
     return toBuffer(encoder)
   }
   _beforeChange () {}
@@ -3560,7 +3541,7 @@ class Y extends NamedEventHandler {
    *
    * @param {String} name
    * @param {Function} TypeConstructor The constructor of the type definition
-   * @returns {Type} The created type. Constructed with TypeConstructor
+   * @returns {any} The created type. Constructed with TypeConstructor
    */
   define (name, TypeConstructor) {
     let id = createRootID(name, TypeConstructor);
@@ -3580,6 +3561,7 @@ class Y extends NamedEventHandler {
    * This returns the same value as `y.share[name]`
    *
    * @param {String} name The typename
+   * @return {any}
    */
   get (name) {
     return this._map.get(name)
@@ -3828,6 +3810,54 @@ class ItemEmbed extends Item {
 }
 
 /**
+ * @module structs
+ */
+
+class ItemBinary extends Item {
+  constructor () {
+    super();
+    this._content = null;
+  }
+  _copy () {
+    let struct = super._copy();
+    struct._content = this._content;
+    return struct
+  }
+  /**
+   * @param {Y} y
+   * @param {decoding.Decoder} decoder
+   */
+  _fromBinary (y, decoder) {
+    const missing = super._fromBinary(y, decoder);
+    this._content = readPayload(decoder);
+    return missing
+  }
+  /**
+   * @param {encoding.Encoder} encoder
+   */
+  _toBinary (encoder) {
+    super._toBinary(encoder);
+    writePayload(encoder, this._content);
+  }
+  /**
+   * Transform this YXml Type to a readable format.
+   * Useful for logging as all Items and Delete implement this method.
+   *
+   * @private
+   */
+  _logString () {
+    return logItemHelper('ItemBinary', this)
+  }
+}
+
+/**
+ *
+ * @param {Item} item
+ * @param {import("../protocols/history").HistorySnapshot} [snapshot]
+ */
+const isVisible = (item, snapshot) => snapshot === undefined ? !item._deleted : (snapshot.sm.has(item._id.user) && snapshot.sm.get(item._id.user) > item._id.clock && !snapshot.ds.isDeleted(item._id));
+
+/**
  * @module types
  */
 
@@ -3910,6 +3940,7 @@ class YArray extends Type {
    * Returns the i-th element from a YArray.
    *
    * @param {number} index The index of the element to return from the YArray
+   * @return {any}
    */
   get (index) {
     let n = this._start;
@@ -3933,10 +3964,11 @@ class YArray extends Type {
   /**
    * Transforms this YArray to a JavaScript Array.
    *
+   * @param {Object} [snapshot]
    * @return {Array}
    */
-  toArray () {
-    return this.map(c => c)
+  toArray (snapshot) {
+    return this.map(c => c, snapshot)
   }
 
   /**
@@ -3958,14 +3990,15 @@ class YArray extends Type {
    * element of this YArray.
    *
    * @param {Function} f Function that produces an element of the new Array
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
    * @return {Array} A new array with each element being the result of the
    *                 callback function
    */
-  map (f) {
+  map (f, snapshot) {
     const res = [];
     this.forEach((c, i) => {
       res.push(f(c, i, this));
-    });
+    }, snapshot);
     return res
   }
 
@@ -3973,14 +4006,17 @@ class YArray extends Type {
    * Executes a provided function on once on overy element of this YArray.
    *
    * @param {Function} f A function to execute on every element of this YArray.
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
    */
-  forEach (f) {
+  forEach (f, snapshot) {
     let index = 0;
     let n = this._start;
     while (n !== null) {
-      if (!n._deleted && n._countable) {
+      if (isVisible(n, snapshot) && n._countable) {
         if (n instanceof Type) {
           f(n, index++, this);
+        } else if (n.constructor === ItemBinary) {
+          f(n._content, index++, this);
         } else {
           const content = n._content;
           const contentLen = content.length;
@@ -4010,6 +4046,7 @@ class YArray extends Type {
         let content;
         if (this._item instanceof Type) {
           content = this._item;
+          this._item = this._item._right;
         } else {
           content = this._item._content[this._itemElement++];
         }
@@ -4060,7 +4097,7 @@ class YArray extends Type {
    *
    * @private
    * @param {Item} left The element container to use as a reference.
-   * @param {Array} content The Array of content to insert (see {@see insert})
+   * @param {Array<number|string|Object|ArrayBuffer>} content The Array of content to insert (see {@see insert})
    */
   insertAfter (left, content) {
     this._transact(y => {
@@ -4097,6 +4134,29 @@ class YArray extends Type {
             left._right = c;
           }
           left = c;
+        } else if (c.constructor === ArrayBuffer) {
+          if (prevJsonIns !== null) {
+            if (y !== null) {
+              prevJsonIns._integrate(y);
+            }
+            left = prevJsonIns;
+            prevJsonIns = null;
+          }
+          const itemBinary = new ItemBinary();
+          itemBinary._origin = left;
+          itemBinary._left = left;
+          itemBinary._right = right;
+          itemBinary._right_origin = right;
+          itemBinary._parent = this;
+          itemBinary._content = c;
+          if (y !== null) {
+            itemBinary._integrate(y);
+          } else if (left === null) {
+            this._start = itemBinary;
+          } else {
+            left._right = itemBinary;
+          }
+          left = itemBinary;
         } else {
           if (prevJsonIns === null) {
             prevJsonIns = new ItemJSON();
@@ -4115,6 +4175,8 @@ class YArray extends Type {
           prevJsonIns._integrate(y);
         } else if (prevJsonIns._left === null) {
           this._start = prevJsonIns;
+        } else {
+          left._right = prevJsonIns;
         }
       }
     });
@@ -4135,7 +4197,7 @@ class YArray extends Type {
    *  yarray.insert(2, [1, 2])
    *
    * @param {number} index The index to insert content at.
-   * @param {Array} content The array of content
+   * @param {Array<number|string|ArrayBuffer|Type>} content The array of content
    */
   insert (index, content) {
     this._transact(() => {
@@ -4168,7 +4230,7 @@ class YArray extends Type {
   /**
    * Appends content to this YArray.
    *
-   * @param {Array} content Array of content to append.
+   * @param {Array<number|string|ArrayBuffer|Type>} content Array of content to append.
    */
   push (content) {
     let n = this._start;
@@ -4242,6 +4304,8 @@ class YMap extends Type {
           } else {
             res = item.toString();
           }
+        } else if (item.constructor === ItemBinary) {
+          res = item._content;
         } else {
           res = item._content[0];
         }
@@ -4254,15 +4318,24 @@ class YMap extends Type {
   /**
    * Returns the keys for each element in the YMap Type.
    *
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
    * @return {Array}
    */
-  keys () {
+  keys (snapshot) {
     // TODO: Should return either Iterator or Set!
     let keys = [];
-    for (let [key, value] of this._map) {
-      if (!value._deleted) {
-        keys.push(key);
+    if (snapshot === undefined) {
+      for (let [key, value] of this._map) {
+        if (value._deleted) {
+          keys.push(key);
+        }
       }
+    } else {
+      this._map.forEach((_, key) => {
+        if (YMap.prototype.has.call(this, key, snapshot)) {
+          keys.push(key);
+        }
+      });
     }
     return keys
   }
@@ -4285,7 +4358,7 @@ class YMap extends Type {
    * Adds or updates an element with a specified key and value.
    *
    * @param {string} key The key of the element to add to this YMap
-   * @param {Object | string | number | Type} value The value of the element to add
+   * @param {Object | string | number | Type | ArrayBuffer } value The value of the element to add
    */
   set (key, value) {
     this._transact(y => {
@@ -4309,6 +4382,9 @@ class YMap extends Type {
         value = v;
       } else if (value instanceof Item) {
         v = value;
+      } else if (value.constructor === ArrayBuffer) {
+        v = new ItemBinary();
+        v._content = value;
       } else {
         v = new ItemJSON();
         v._content = [value];
@@ -4330,16 +4406,27 @@ class YMap extends Type {
    * Returns a specified element from this YMap.
    *
    * @param {string} key The key of the element to return.
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
    */
-  get (key) {
+  get (key, snapshot) {
     let v = this._map.get(key);
-    if (v === undefined || v._deleted) {
+    if (v === undefined) {
       return undefined
     }
-    if (v instanceof Type) {
-      return v
-    } else {
-      return v._content[v._content.length - 1]
+    if (snapshot !== undefined) {
+      // iterate until found element that exists
+      while (!snapshot.sm.has(v._id.user) || v._id.clock >= snapshot.sm.get(v._id.user)) {
+        v = v._right;
+      }
+    }
+    if (isVisible(v, snapshot)) {
+      if (v instanceof Type) {
+        return v
+      } else if (v.constructor === ItemBinary) {
+        return v._content
+      } else {
+        return v._content[v._content.length - 1]
+      }
     }
   }
 
@@ -4347,14 +4434,20 @@ class YMap extends Type {
    * Returns a boolean indicating whether the specified key exists or not.
    *
    * @param {string} key The key to test.
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
    */
-  has (key) {
+  has (key, snapshot) {
     let v = this._map.get(key);
-    if (v === undefined || v._deleted) {
+    if (v === undefined) {
       return false
-    } else {
-      return true
     }
+    if (snapshot !== undefined) {
+      // iterate until found element that exists
+      while (!snapshot.sm.has(v._id.user) || v._id.clock >= snapshot.sm.get(v._id.user)) {
+        v = v._right;
+      }
+    }
+    return isVisible(v, snapshot)
   }
 
   /**
@@ -4932,11 +5025,13 @@ class YText extends YArray {
   /**
    * Returns the Delta representation of this YText type.
    *
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
+   * @param {import('../protocols/history.js').HistorySnapshot} [prevSnapshot]
    * @return {Delta} The Delta representation of this type.
    *
    * @public
    */
-  toDelta () {
+  toDelta (snapshot, prevSnapshot) {
     let ops = [];
     let currentAttributes = new Map();
     let str = '';
@@ -4962,9 +5057,24 @@ class YText extends YArray {
       }
     }
     while (n !== null) {
-      if (!n._deleted) {
+      if (isVisible(n, snapshot) || (prevSnapshot !== undefined && isVisible(n, prevSnapshot))) {
         switch (n.constructor) {
           case ItemString:
+            const cur = currentAttributes.get('ychange');
+            if (snapshot !== undefined && !isVisible(n, snapshot)) {
+              if (cur === undefined || cur.user !== n._id.user || cur.state !== 'removed') {
+                packStr();
+                currentAttributes.set('ychange', { user: n._id.user, state: 'removed' });
+              }
+            } else if (prevSnapshot !== undefined && !isVisible(n, prevSnapshot)) {
+              if (cur === undefined || cur.user !== n._id.user || cur.state !== 'added') {
+                packStr();
+                currentAttributes.set('ychange', { user: n._id.user, state: 'added' });
+              }
+            } else if (cur !== undefined) {
+              packStr();
+              currentAttributes.delete('ychange');
+            }
             str += n._content;
             break
           case ItemEmbed:
@@ -5655,27 +5765,35 @@ class YXmlElement extends YXmlFragment {
    *
    * @param {String} attributeName The attribute name that identifies the
    *                               queried value.
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
    * @return {String} The queried attribute value.
    *
    * @public
    */
-  getAttribute (attributeName) {
-    return YMap.prototype.get.call(this, attributeName)
+  getAttribute (attributeName, snapshot) {
+    return YMap.prototype.get.call(this, attributeName, snapshot)
   }
 
   /**
    * Returns all attribute name/value pairs in a JSON Object.
    *
+   * @param {import('../protocols/history.js').HistorySnapshot} [snapshot]
    * @return {Object} A JSON Object that describes the attributes.
    *
    * @public
    */
-  getAttributes () {
+  getAttributes (snapshot) {
     const obj = {};
-    for (let [key, value] of this._map) {
-      if (!value._deleted) {
-        obj[key] = value._content[0];
+    if (snapshot === undefined) {
+      for (let [key, value] of this._map) {
+        if (!value._deleted) {
+          obj[key] = value._content[0];
+        }
       }
+    } else {
+      YMap.prototype.keys.call(this, snapshot).forEach(key => {
+        obj[key] = YMap.prototype.get.call(this, key, snapshot);
+      });
     }
     return obj
   }
@@ -5984,24 +6102,22 @@ const readUsersStateChange = (decoder, y) => {
     const userID = readVarUint(decoder);
     const clock = readVarUint(decoder);
     const state = JSON.parse(readVarString(decoder));
-    if (userID !== y.userID) {
-      const uClock = y.awarenessClock.get(userID) || 0;
-      y.awarenessClock.set(userID, clock);
-      if (state === null) {
-        // only write if clock increases. cannot overwrite
-        if (y.awareness.has(userID) && uClock < clock) {
-          y.awareness.delete(userID);
-          removed.push(userID);
-        }
-      } else if (uClock <= clock) { // allow to overwrite (e.g. when client was on, then offline)
-        if (y.awareness.has(userID)) {
-          updated.push(userID);
-        } else {
-          added.push(userID);
-        }
-        y.awareness.set(userID, state);
-        y.awarenessClock.set(userID, clock);
+    const uClock = y.awarenessClock.get(userID) || 0;
+    y.awarenessClock.set(userID, clock);
+    if (state === null) {
+      // only write if clock increases. cannot overwrite
+      if (y.awareness.has(userID) && uClock < clock) {
+        y.awareness.delete(userID);
+        removed.push(userID);
       }
+    } else if (uClock <= clock) { // allow to overwrite (e.g. when client was on, then offline)
+      if (y.awareness.has(userID)) {
+        updated.push(userID);
+      } else {
+        added.push(userID);
+      }
+      y.awareness.set(userID, state);
+      y.awarenessClock.set(userID, clock);
     }
   }
   if (added.length > 0 || updated.length > 0 || removed.length > 0) {
@@ -6377,15 +6493,24 @@ const setupWS = (doc, url) => {
   websocket.onclose = () => {
     doc.ws = null;
     doc.wsconnected = false;
+    // update awareness (all users left)
+    const removed = [];
+    doc.getAwarenessInfo().forEach((_, userid) => {
+      removed.push(userid);
+    });
+    doc.awareness = new Map();
+    doc.emit('awareness', {
+      added: [], updated: [], removed
+    });
     doc.emit('status', {
-      status: 'connected'
+      status: 'disconnected'
     });
     setTimeout(setupWS, reconnectTimeout, doc, url);
   };
   websocket.onopen = () => {
     doc.wsconnected = true;
     doc.emit('status', {
-      status: 'disconnected'
+      status: 'connected'
     });
     // always send sync step 1 when connected
     const encoder = createEncoder();
@@ -6412,8 +6537,8 @@ const broadcastUpdate = (y, transaction) => {
 };
 
 class WebsocketsSharedDocument extends Y {
-  constructor (url) {
-    super();
+  constructor (url, opts) {
+    super(opts);
     this.url = url;
     this.wsconnected = false;
     this.mux = createMutex();
@@ -6423,6 +6548,7 @@ class WebsocketsSharedDocument extends Y {
     this.awarenessClock = new Map();
     setupWS(this, url);
     this.on('afterTransaction', broadcastUpdate);
+
   }
   getLocalAwarenessInfo () {
     return this._localAwarenessState
@@ -6472,10 +6598,10 @@ class WebsocketProvider$$1 {
    * @param {string} name
    * @return {WebsocketsSharedDocument}
    */
-  get (name) {
+  get (name, opts) {
     let doc = this.docs.get(name);
     if (doc === undefined) {
-      doc = new WebsocketsSharedDocument(this.url + name);
+      doc = new WebsocketsSharedDocument(this.url + name, opts);
     }
     return doc
   }
@@ -6569,6 +6695,7 @@ registerStruct(9, YXmlElement);
 registerStruct(10, YXmlText);
 registerStruct(11, YXmlHook);
 registerStruct(12, ItemEmbed);
+registerStruct(13, ItemBinary);
 
 exports.decoding = decoding;
 exports.encoding = encoding;

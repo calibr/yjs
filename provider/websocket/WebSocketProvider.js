@@ -67,15 +67,24 @@ const setupWS = (doc, url) => {
   websocket.onclose = () => {
     doc.ws = null
     doc.wsconnected = false
+    // update awareness (all users left)
+    const removed = []
+    doc.getAwarenessInfo().forEach((_, userid) => {
+      removed.push(userid)
+    })
+    doc.awareness = new Map()
+    doc.emit('awareness', {
+      added: [], updated: [], removed
+    })
     doc.emit('status', {
-      status: 'connected'
+      status: 'disconnected'
     })
     setTimeout(setupWS, reconnectTimeout, doc, url)
   }
   websocket.onopen = () => {
     doc.wsconnected = true
     doc.emit('status', {
-      status: 'disconnected'
+      status: 'connected'
     })
     // always send sync step 1 when connected
     const encoder = Y.encoding.createEncoder()
@@ -102,8 +111,8 @@ const broadcastUpdate = (y, transaction) => {
 }
 
 class WebsocketsSharedDocument extends Y.Y {
-  constructor (url) {
-    super()
+  constructor (url, opts) {
+    super(opts)
     this.url = url
     this.wsconnected = false
     this.mux = Y.createMutex()
@@ -113,6 +122,7 @@ class WebsocketsSharedDocument extends Y.Y {
     this.awarenessClock = new Map()
     setupWS(this, url)
     this.on('afterTransaction', broadcastUpdate)
+
   }
   getLocalAwarenessInfo () {
     return this._localAwarenessState
@@ -162,10 +172,10 @@ export class WebsocketProvider {
    * @param {string} name
    * @return {WebsocketsSharedDocument}
    */
-  get (name) {
+  get (name, opts) {
     let doc = this.docs.get(name)
     if (doc === undefined) {
-      doc = new WebsocketsSharedDocument(this.url + name)
+      doc = new WebsocketsSharedDocument(this.url + name, opts)
     }
     return doc
   }

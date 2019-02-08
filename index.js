@@ -5,6 +5,7 @@ import { ItemJSON } from './structs/ItemJSON.js'
 import { ItemString } from './structs/ItemString.js'
 import { ItemFormat } from './structs/ItemFormat.js'
 import { ItemEmbed } from './structs/ItemEmbed.js'
+import { ItemBinary } from './structs/ItemBinary.js'
 import { GC } from './structs/GC.js'
 
 import { YArray } from './types/YArray.js'
@@ -61,3 +62,4 @@ registerStruct(9, YXmlElement)
 registerStruct(10, YXmlText)
 registerStruct(11, YXmlHook)
 registerStruct(12, ItemEmbed)
+registerStruct(13, ItemBinary)

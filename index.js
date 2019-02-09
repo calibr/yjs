@@ -36,6 +36,7 @@ export { YText as Text } from './types/YText.js'
 export { YXmlText as XmlText } from './types/YXmlText.js'
 export { YXmlHook as XmlHook } from './types/YXmlHook.js'
 export { YXmlElement as XmlElement, YXmlFragment as XmlFragment } from './types/YXmlElement.js'
+export { writeDeleteStore } from './utils/DeleteStore.js'
 
 export { getRelativePosition, fromRelativePosition } from './utils/relativePosition.js'
 export { registerStruct } from './utils/structReferences.js'

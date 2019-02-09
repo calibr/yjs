@@ -6713,6 +6713,7 @@ exports.XmlText = YXmlText;
 exports.XmlHook = YXmlHook;
 exports.XmlElement = YXmlElement;
 exports.XmlFragment = YXmlFragment;
+exports.writeDeleteStore = writeDeleteStore;
 exports.getRelativePosition = getRelativePosition;
 exports.fromRelativePosition = fromRelativePosition;
 exports.registerStruct = registerStruct;

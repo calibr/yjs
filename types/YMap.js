@@ -112,6 +112,10 @@ export class YMap extends Type {
    * @param {Object | string | number | Type | ArrayBuffer } value The value of the element to add
    */
   set (key, value) {
+    if(typeof value === 'undefined') {
+      // no reason to set undefined value in map
+      return value
+    }
     this._transact(y => {
       const old = this._map.get(key) || null
       if (old !== null) {
@@ -133,7 +137,7 @@ export class YMap extends Type {
         value = v
       } else if (value instanceof Item) {
         v = value
-      } else if (value.constructor === ArrayBuffer) {
+      } else if (value !== null && value.constructor === ArrayBuffer) {
         v = new ItemBinary()
         v._content = value
       } else {

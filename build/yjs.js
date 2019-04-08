@@ -4361,6 +4361,10 @@ class YMap extends Type {
    * @param {Object | string | number | Type | ArrayBuffer } value The value of the element to add
    */
   set (key, value) {
+    if(typeof value === 'undefined') {
+      // no reason to set undefined value in map
+      return value
+    }
     this._transact(y => {
       const old = this._map.get(key) || null;
       if (old !== null) {
@@ -4382,7 +4386,7 @@ class YMap extends Type {
         value = v;
       } else if (value instanceof Item) {
         v = value;
-      } else if (value.constructor === ArrayBuffer) {
+      } else if (value !== null && value.constructor === ArrayBuffer) {
         v = new ItemBinary();
         v._content = value;
       } else {
@@ -6306,6 +6310,20 @@ function applyReverseOperation (y, scopes, reverseBuffer) {
   return [performedUndo, undoOp]
 }
 
+function getMaxState(s1, s2) {
+  if(s1.clock > s2.clock) {
+    return s1
+  }
+  return s2
+}
+
+function getMinState(s1, s2) {
+  if(s1.clock < s2.clock) {
+    return s1
+  }
+  return s2
+}
+
 /**
  * Saves a history of locally applied operations. The UndoManager handles the
  * undoing and redoing of locally created changes.
@@ -6363,10 +6381,22 @@ class UndoManager extends NamedEventHandler {
             (options.captureTimeout < 0 || reverseOperation.created - lastUndoOp.created <= options.captureTimeout)
           ) {
             lastUndoOp.created = reverseOperation.created;
+
+            // merge operations state here
+            // it can happen that older transactions appear later than recent, so we need
+            // to take this into account and get the max state for toState and the min state for fromState
             if (reverseOperation.toState !== null) {
-              lastUndoOp.toState = reverseOperation.toState;
-              if (lastUndoOp.fromState === null) {
+              if(lastUndoOp.toState === null) {
+                lastUndoOp.toState = reverseOperation.toState;
+              }
+              else {
+                lastUndoOp.toState = getMaxState(lastUndoOp.toState, reverseOperation.toState);
+              }
+              if(lastUndoOp.fromState === null) {
                 lastUndoOp.fromState = reverseOperation.fromState;
+              }
+              else {
+                lastUndoOp.fromState = getMinState(lastUndoOp.fromState, reverseOperation.fromState);
               }
             }
             reverseOperation.deletedStructs.forEach(lastUndoOp.deletedStructs.add, lastUndoOp.deletedStructs);

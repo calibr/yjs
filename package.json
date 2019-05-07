@@ -101,7 +101,7 @@
     "crel": "^3.1.0"
   },
   "optionalDependencies": {
-    "level": "^4.0.0",
+    "level": "^5.0.1",
     "ws": "^6.1.0"
   }
 }

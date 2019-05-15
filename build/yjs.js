@@ -2515,6 +2515,9 @@ class NamedEventHandler {
    * @param {Array} args The arguments that are applied to the event listener.
    */
   emit (name, ...args) {
+    if(!this._eventListener) {
+      console.error('cannot emit event on already destroyed instance', name, args);
+    }
     this._initStateListener(name).resolve();
     const listener = this._eventListener.get(name);
     if (listener !== undefined) {

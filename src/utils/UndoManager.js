@@ -124,7 +124,12 @@ export class UndoManager extends Observable {
     this.redoing = false
     this.doc = /** @type {Doc} */ (this.scope[0].doc)
     this.lastChange = 0
+    this.skipping = false
+
     this.doc.on('afterTransaction', /** @param {Transaction} transaction */ transaction => {
+      if(this.skipping) {
+        return
+      }
       // Only track certain transactions
       if (!this.scope.some(type => transaction.changedParentTypes.has(type)) || (!this.trackedTransactionOrigins.has(transaction.origin) && (!transaction.origin || !this.trackedTransactionOrigins.has(transaction.origin.constructor)))) {
         return
@@ -161,6 +166,14 @@ export class UndoManager extends Observable {
       })
       this.emit('stack-item-added', [{ stackItem: stack[stack.length - 1], origin: transaction.origin, type: undoing ? 'redo' : 'undo' }, this])
     })
+  }
+
+  startSkipping() {
+    this.skipping = true
+  }
+
+  stopSkipping() {
+    this.skipping = false
   }
 
   /**

@@ -1,4 +1,5 @@
 node_modules
-dist
 .vscode
 docs
+*.sublime-project
+*.sublime-workspace

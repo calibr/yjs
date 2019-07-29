@@ -43,12 +43,10 @@ const popStackItem = (undoManager, stack, eventType) => {
    * Whether a change happened
    * @type {StackItem?}
    */
-  console.log('popping stack item...')
   let result = null
   const doc = undoManager.doc
   const scope = undoManager.scope
   transact(doc, transaction => {
-    console.log('stack length ...', stack.length)
     while (stack.length > 0 && result === null) {
       const store = doc.store
       const stackItem = /** @type {StackItem} */ (stack.pop())
@@ -63,9 +61,7 @@ const popStackItem = (undoManager, stack, eventType) => {
         performedChange = redoItem(transaction, item, itemsToRedo) !== null || performedChange
       })
       const structs = /** @type {Array<GC|Item>} */ (store.clients.get(doc.clientID))
-      console.log('iterate structs ...', stack.length, structs, stackItem.start, stackItem.len)
       iterateStructs(transaction, structs, stackItem.start, stackItem.len, struct => {
-        console.log('got struct', struct)
         if (struct instanceof Item && scope.some(type => isParentOf(type, /** @type {Item} */ (struct)))) {
           if (struct.redone !== null) {
             let { item, diff } = followRedone(store, struct.id)

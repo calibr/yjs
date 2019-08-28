@@ -1285,9 +1285,35 @@ const popStackItem = (undoManager, stack, eventType) => {
       const stackItem = /** @type {StackItem} */ (stack.pop());
       const itemsToRedo = new Set();
       let performedChange = false;
+      const startId = stackItem.start;
+      const endId = stackItem.start + stackItem.len - 1;
       iterateDeletedStructs(transaction, stackItem.ds, store, struct => {
         if (struct instanceof Item && scope.some(type => isParentOf(type, struct))) {
-          itemsToRedo.add(struct);
+          if(struct.parentSub) {
+            if(struct.length > 1) {
+              const structs = store.clients.get(struct.id.client);
+              let remain = struct;
+              while(remain.length > 1) {
+                let left = remain;
+                const index = findIndexSS(structs, left.id.clock);
+                remain = splitItem(transaction, remain, 1);
+                structs.splice(index + 1, 0, remain);
+                if(left.id.clock >= startId && left.id.clock <= endId) ;
+                else {
+                  itemsToRedo.add(left);
+                }
+              }
+            }
+            else {
+              if(struct.id.clock >= startId && struct.id.clock <= endId) ;
+              else {
+                itemsToRedo.add(struct);
+              }
+            }
+          }
+          else {
+            itemsToRedo.add(struct);
+          }
         }
       });
       itemsToRedo.forEach(item => {

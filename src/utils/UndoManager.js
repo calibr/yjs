@@ -52,15 +52,30 @@ const popStackItem = (undoManager, stack, eventType) => {
       const stackItem = /** @type {StackItem} */ (stack.pop())
       const itemsToRedo = new Set()
       let performedChange = false
+
+      const structs = /** @type {Array<GC|Item>} */ (store.clients.get(doc.clientID))
+      const startClock = stackItem.start
+      const endClock = stackItem.start + stackItem.len - 1
+      const endStructsClock = structs[structs.length - 1].id.clock + structs[structs.length - 1].length - 1
+
+      // make sure structs don't overlap with the range of created operations [stackItem.start, stackItem.start + stackItem.end)
+      if (endStructsClock >= startClock) {
+        getItemCleanStart(transaction, store, createID(doc.clientID, stackItem.start))
+      }
+      if (stackItem.len > 1 && endStructsClock >= endClock) {
+        getItemCleanStart(transaction, store, createID(doc.clientID, endClock))
+      }
+
       iterateDeletedStructs(transaction, stackItem.ds, store, struct => {
         if (struct instanceof Item && scope.some(type => isParentOf(type, struct))) {
-          itemsToRedo.add(struct)
+          if (!(struct.id.client === doc.clientID && struct.id.clock >= stackItem.start && struct.id.clock < stackItem.start + stackItem.len)) {
+            itemsToRedo.add(struct)
+          }
         }
       })
       itemsToRedo.forEach(item => {
         performedChange = redoItem(transaction, item, itemsToRedo) !== null || performedChange
       })
-      const structs = /** @type {Array<GC|Item>} */ (store.clients.get(doc.clientID))
       /**
        * @type {Array<Item>}
        */

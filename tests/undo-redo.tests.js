@@ -65,6 +65,18 @@ export const testUndoMap = tc => {
   t.assert(map0.get('a') === 44)
   undoManager.redo()
   t.assert(map0.get('a') === 44)
+
+  // test setting value multiple times
+  map0.set('b', 'initial')
+  undoManager.stopCapturing()
+  map0.set('b', 'val1')
+  map0.set('b', 'val2')
+  undoManager.stopCapturing()
+  undoManager.undo()
+
+  console.log('map value:\n\n', map0.get('b'), '\n\n')
+
+  t.assert(map0.get('b') === 'initial')
 }
 
 /**

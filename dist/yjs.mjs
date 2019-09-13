@@ -1431,7 +1431,7 @@ const popStackItem = (undoManager, stack, eventType) => {
        */
       const itemsToDelete = [];
       iterateStructs(transaction, structs, stackItem.start, stackItem.len, struct => {
-        if (struct instanceof Item && !struct.deleted && scope.some(type => isParentOf(type, /** @type {Item} */ (struct)))) {
+        if (struct instanceof Item && scope.some(type => isParentOf(type, /** @type {Item} */ (struct)))) {
           if (struct.redone !== null) {
             let { item, diff } = followRedone(store, struct.id);
             if (diff > 0) {

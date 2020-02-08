@@ -8,6 +8,7 @@ import {
   isVisible,
   ContentType,
   ContentAny,
+  ContentJSON,
   ContentBinary,
   createID,
   getItemCleanStart,
@@ -375,7 +376,7 @@ export const typeListInsertGenericsAfter = (transaction, parent, referenceItem, 
   let jsonContent = []
   const packJsonContent = () => {
     if (jsonContent.length > 0) {
-      left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentAny(jsonContent))
+      left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentJSON(jsonContent))
       left.integrate(transaction)
       jsonContent = []
     }
@@ -504,7 +505,7 @@ export const typeMapSet = (transaction, parent, key, value) => {
   const left = parent._map.get(key) || null
   let content
   if (value == null) {
-    content = new ContentAny([value])
+    content = new ContentJSON([value])
   } else {
     switch (value.constructor) {
       case Number:
@@ -512,7 +513,7 @@ export const typeMapSet = (transaction, parent, key, value) => {
       case Boolean:
       case Array:
       case String:
-        content = new ContentAny([value])
+        content = new ContentJSON([value])
         break
       case Uint8Array:
         content = new ContentBinary(/** @type {Uint8Array} */ (value))

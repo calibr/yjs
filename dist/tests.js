@@ -1750,7 +1750,13 @@
   const readUpdate = (decoder, ydoc, transactionOrigin) =>
     transact(ydoc, transaction => {
       readStructs(decoder, transaction, ydoc.store);
-      readAndApplyDeleteSet(decoder, transaction, ydoc.store);
+      let allowDeletes = true;
+      if (typeof transactionOrigin === 'object' && transactionOrigin.disableDeletes === true) {
+        allowDeletes = false;
+      }
+      if (!allowDeletes) {
+        readAndApplyDeleteSet(decoder, transaction, ydoc.store);
+      }
     }, transactionOrigin, false);
 
   /**

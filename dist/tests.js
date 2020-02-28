@@ -1754,7 +1754,7 @@
       if (typeof transactionOrigin === 'object' && transactionOrigin.disableDeletes === true) {
         allowDeletes = false;
       }
-      if (!allowDeletes) {
+      if (allowDeletes) {
         readAndApplyDeleteSet(decoder, transaction, ydoc.store);
       }
     }, transactionOrigin, false);

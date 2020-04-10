@@ -4387,6 +4387,7 @@ class YText extends AbstractType {
         n = n.right;
       }
       packStr();
+      debugger
     }, splitSnapshotAffectedStructs);
     return ops
   }

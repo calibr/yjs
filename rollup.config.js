@@ -52,6 +52,15 @@ export default [{
   },
   external: id => /^lib0\//.test(id)
 }, {
+  input: './src/index.js',
+  output: {
+    name: 'Y',
+    file: 'dist/yjs.mjs',
+    format: 'esm',
+    sourcemap: true
+  },
+  external: id => /^lib0\//.test(id)
+}, {
   input: './tests/index.js',
   output: {
     name: 'test',
@@ -62,7 +71,6 @@ export default [{
   plugins: [
     debugResolve,
     nodeResolve({
-      sourcemap: true,
       mainFields: ['module', 'browser', 'main']
     }),
     commonjs()
@@ -78,7 +86,6 @@ export default [{
   plugins: [
     debugResolve,
     nodeResolve({
-      sourcemap: true,
       mainFields: ['module', 'main']
     }),
     commonjs()

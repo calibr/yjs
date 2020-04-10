@@ -1,9 +1,9 @@
 {
   "name": "yjs",
-  "version": "13.0.2",
+  "version": "13.0.5",
   "description": "Shared Editing Library",
   "main": "./dist/yjs.cjs",
-  "module": "./src/index.js",
+  "module": "./dist/yjs.mjs",
   "types": "./dist/src/index.d.ts",
   "sideEffects": false,
   "scripts": {
@@ -70,6 +70,6 @@
     "standard": "^14.0.0",
     "tui-jsdoc-template": "^1.2.2",
     "typescript": "^3.7.5",
-    "y-protocols": "^0.2.0"
+    "y-protocols": "^0.2.3"
   }
 }

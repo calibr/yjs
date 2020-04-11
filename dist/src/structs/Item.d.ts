@@ -74,12 +74,10 @@ export class Item extends AbstractStruct {
     keep: boolean;
     /**
      * Returns the next non-deleted item
-     * @private
      */
     get next(): Item | null;
     /**
      * Returns the previous non-deleted item
-     * @private
      */
     get prev(): Item | null;
     /**
@@ -102,8 +100,6 @@ export class Item extends AbstractStruct {
     /**
      * @param {StructStore} store
      * @param {boolean} parentGCd
-     *
-     * @private
      */
     gc(store: StructStore, parentGCd: boolean): void;
     /**
@@ -114,8 +110,6 @@ export class Item extends AbstractStruct {
      *
      * @param {encoding.Encoder} encoder The encoder to write data to.
      * @param {number} offset
-     *
-     * @private
      */
     write(encoder: encoding.Encoder, offset: number): void;
 }

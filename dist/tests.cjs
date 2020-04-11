@@ -5,20 +5,26 @@ function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'defau
 var iso = _interopDefault(require('isomorphic.js'));
 
 /**
+ * Utility module to work with Arrays.
+ *
+ * @module array
+ */
+
+/**
  * Return the last element of an array. The element must exist
  *
- * @template T
- * @param {Array<T>} arr
- * @return {T}
+ * @template L
+ * @param {Array<L>} arr
+ * @return {L}
  */
 const last = arr => arr[arr.length - 1];
 
 /**
  * Append elements from src to dest
  *
- * @template T
- * @param {Array<T>} dest
- * @param {Array<T>} src
+ * @template M
+ * @param {Array<M>} dest
+ * @param {Array<M>} src
  */
 const appendTo = (dest, src) => {
   for (let i = 0; i < src.length; i++) {
@@ -26,14 +32,26 @@ const appendTo = (dest, src) => {
   }
 };
 
+/**
+ * Transforms something array-like to an actual Array.
+ *
+ * @function
+ * @template T
+ * @param {ArrayLike<T>|Iterable<T>} arraylike
+ * @return {T}
+ */
 const from = Array.from;
 
 /**
+ * Common Math expressions.
+ *
  * @module math
  */
+
 const floor = Math.floor;
 const ceil = Math.ceil;
 const round = Math.round;
+const log10 = Math.log10;
 
 /**
  * @function
@@ -58,16 +76,39 @@ const min = (a, b) => a < b ? a : b;
  * @return {number} The bigger element of a and b
  */
 const max = (a, b) => a > b ? a : b;
+/**
+ * Base 10 exponential function. Returns the value of 10 raised to the power of pow.
+ *
+ * @param {number} exp
+ * @return {number}
+ */
+const exp10 = exp => Math.pow(10, exp);
 
+/**
+ * Utility module to work with key-value stores.
+ *
+ * @module map
+ */
+
+/**
+ * Creates a new Map instance.
+ *
+ * @function
+ * @return {Map<any, any>}
+ *
+ * @function
+ */
 const create = () => new Map();
 
 /**
  * Get map property. Create T if property is undefined and set T on map.
  *
- * @example
- *   const listeners = map.setIfUndefined(events, 'eventName', set.create)
- *   listeners.add(listener)
+ * ```js
+ * const listeners = map.setIfUndefined(events, 'eventName', set.create)
+ * listeners.add(listener)
+ * ```
  *
+ * @function
  * @template T,K
  * @param {Map<K, T>} map
  * @param {K} key
@@ -83,6 +124,9 @@ const setIfUndefined = (map, key, createT) => {
 };
 
 /**
+ * Creates an Array and populates it with the content of all key-value pairs using the `f(value, key)` function.
+ *
+ * @function
  * @template K
  * @template V
  * @template R
@@ -99,6 +143,11 @@ const map = (m, f) => {
 };
 
 /**
+ * Tests whether any key-value pairs pass the test implemented by `f(value, key)`.
+ *
+ * @todo should rename to some - similarly to Array.some
+ *
+ * @function
  * @template K
  * @template V
  * @param {Map<K,V>} m
@@ -115,6 +164,8 @@ const any = (m, f) => {
 };
 
 /**
+ * Utility module to work with strings.
+ *
  * @module string
  */
 const fromCodePoint = String.fromCodePoint;
@@ -193,7 +244,7 @@ const _decodeUtf8Polyfill = buf => {
 };
 
 /* istanbul ignore next */
-const utf8TextDecoder = typeof TextDecoder === 'undefined' ? null : new TextDecoder('utf-8', { fatal: true });
+const utf8TextDecoder = typeof TextDecoder === 'undefined' ? null : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /**
  * @param {Uint8Array} buf
@@ -209,12 +260,76 @@ const _decodeUtf8Native = buf => /** @type {TextDecoder} */ (utf8TextDecoder).de
 const decodeUtf8 = utf8TextDecoder ? _decodeUtf8Native : _decodeUtf8Polyfill;
 
 /**
+ * Often used conditions.
+ *
+ * @module conditions
+ */
+
+/**
  * @template T
  * @param {T|null|undefined} v
  * @return {T|null}
  */
 /* istanbul ignore next */
 const undefinedToNull = v => v === undefined ? null : v;
+
+/* global localStorage */
+
+/**
+ * Isomorphic variable storage.
+ *
+ * Uses LocalStorage in the browser and falls back to in-memory storage.
+ *
+ * @module storage
+ */
+
+/* istanbul ignore next */
+class VarStoragePolyfill {
+  constructor () {
+    this.map = new Map();
+  }
+
+  /**
+   * @param {string} key
+   * @param {any} value
+   */
+  setItem (key, value) {
+    this.map.set(key, value);
+  }
+
+  /**
+   * @param {string} key
+   */
+  getItem (key) {
+    return this.map.get(key)
+  }
+}
+
+/* istanbul ignore next */
+/**
+ * @type {any}
+ */
+let _localStorage = new VarStoragePolyfill();
+
+try {
+  // if the same-origin rule is violated, accessing localStorage might thrown an error
+  /* istanbul ignore next */
+  if (typeof localStorage !== 'undefined') {
+    _localStorage = localStorage;
+  }
+} catch (e) { }
+
+/* istanbul ignore next */
+/**
+ * This is basically localStorage in browser, or a polyfill in nodejs
+ */
+const varStorage = _localStorage;
+
+/**
+ * Isomorphic module to work access the environment (query params, env variables).
+ *
+ * @module map
+ */
 
 /* istanbul ignore next */
 // @ts-ignore
@@ -290,7 +405,7 @@ const getParam = (name, defaultVal) => computeParams().get(name) || defaultVal;
  * @return {string|null}
  */
 /* istanbul ignore next */
-const getVariable = name => isNode ? undefinedToNull(process.env[name.toUpperCase()]) : undefinedToNull(window.localStorage.getItem(name));
+const getVariable = name => isNode ? undefinedToNull(process.env[name.toUpperCase()]) : undefinedToNull(varStorage.getItem(name));
 
 /**
  * @param {string} name
@@ -301,6 +416,12 @@ const hasConf = name => hasParam('--' + name) || getVariable(name) !== null;
 
 /* istanbul ignore next */
 const production = hasConf('production');
+
+/**
+ * Utility functions to work with buffers (Uint8Array).
+ *
+ * @module buffer
+ */
 
 /**
  * @param {number} len
@@ -338,14 +459,45 @@ const BITS7 = 127;
 const BITS31 = 0x7FFFFFFF;
 const BITS32 = 0xFFFFFFFF;
 
+/**
+ * Utility helpers for working with numbers.
+ *
+ * @module number
+ */
+
+/**
+ * @module number
+ */
+
 /* istanbul ignore next */
 const isInteger = Number.isInteger || (num => typeof num === 'number' && isFinite(num) && floor(num) === num);
 
 /**
- * @module encoding
+ * Efficient schema-less binary encoding with support for variable length encoding.
+ *
+ * Use [lib0/encoding] with [lib0/decoding]. Every encoding function has a corresponding decoding function.
+ *
  * Encodes numbers in little-endian order (least to most significant byte order)
- * This should be compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
+ * and is compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
  * which is also used in Protocol Buffers.
+ *
+ * ```js
+ * // encoding step
+ * const encoder = new encoding.createEncoder()
+ * encoding.writeVarUint(encoder, 256)
+ * encoding.writeVarString(encoder, 'Hello world!')
+ * const buf = encoding.toUint8Array(encoder)
+ * ```
+ *
+ * ```js
+ * // decoding step
+ * const decoder = new decoding.createDecoder(buf)
+ * decoding.readVarUint(decoder) // => 256
+ * decoding.readVarString(decoder) // => 'Hello world!'
+ * decoding.hasContent(decoder) // => false - all data is read
+ * ```
+ *
+ * @module encoding
  */
 
 /**
@@ -539,13 +691,14 @@ const writeVarUint8Array = (encoder, uint8Array) => {
  * Create an DataView of the next `len` bytes. Use it to write data after
  * calling this function.
  *
- * @example
- *     // write float32 using DataView
- *     const dv = writeOnDataView(encoder, 4)
- *     dv.setFloat32(0, 1.1)
- *     // read float32 using DataView
- *     const dv = readFromDataView(encoder, 4)
- *     dv.getFloat32(0) // => 1.100000023841858 (leaving it to the reader to find out why this is the correct result)
+ * ```js
+ * // write float32 using DataView
+ * const dv = writeOnDataView(encoder, 4)
+ * dv.setFloat32(0, 1.1)
+ * // read float32 using DataView
+ * const dv = readFromDataView(encoder, 4)
+ * dv.getFloat32(0) // => 1.100000023841858 (leaving it to the reader to find out why this is the correct result)
+ * ```
  *
  * @param {Encoder} encoder
  * @param {number} len
@@ -690,6 +843,30 @@ const writeAny = (encoder, data) => {
 };
 
 /**
+ * Efficient schema-less binary decoding with support for variable length encoding.
+ *
+ * Use [lib0/decoding] with [lib0/encoding]. Every encoding function has a corresponding decoding function.
+ *
+ * Encodes numbers in little-endian order (least to most significant byte order)
+ * and is compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
+ * which is also used in Protocol Buffers.
+ *
+ * ```js
+ * // encoding step
+ * const encoder = new encoding.createEncoder()
+ * encoding.writeVarUint(encoder, 256)
+ * encoding.writeVarString(encoder, 'Hello world!')
+ * const buf = encoding.toUint8Array(encoder)
+ * ```
+ *
+ * ```js
+ * // decoding step
+ * const decoder = new decoding.createDecoder(buf)
+ * decoding.readVarUint(decoder) // => 256
+ * decoding.readVarString(decoder) // => 'Hello world!'
+ * decoding.hasContent(decoder) // => false - all data is read
+ * ```
+ *
  * @module decoding
  */
 
@@ -701,7 +878,17 @@ class Decoder {
    * @param {Uint8Array} uint8Array Binary data to decode
    */
   constructor (uint8Array) {
+    /**
+     * Decoding target.
+     *
+     * @type {Uint8Array}
+     */
     this.arr = uint8Array;
+    /**
+     * Current decoding position.
+     *
+     * @type {number}
+     */
     this.pos = 0;
   }
 }
@@ -921,7 +1108,6 @@ class DeleteSet {
   constructor () {
     /**
      * @type {Map<number,Array<DeleteItem>>}
-     * @private
      */
     this.clients = new Map();
   }
@@ -1192,7 +1378,19 @@ const readAndApplyDeleteSet = (decoder, transaction, store) => {
   }
 };
 
+/**
+ * Utility module to work with sets.
+ *
+ * @module set
+ */
+
 const create$1 = () => new Set();
+
+/**
+ * Observable class prototype.
+ *
+ * @module observable
+ */
 
 /**
  * Handles named events.
@@ -1202,6 +1400,7 @@ const create$1 = () => new Set();
 class Observable {
   constructor () {
     /**
+     * Some desc.
      * @type {Map<N, any>}
      */
     this._observers = create();
@@ -1263,7 +1462,11 @@ class Observable {
   }
 }
 
-// @ts-ignore
+/**
+ * Isomorphic library exports from isomorphic.js.
+ *
+ * @module isomorphic
+ */
 
 const performance = /** @type {any} */ (iso.performance);
 const cryptoRandomBuffer = /** @type {any} */ (iso.cryptoRandomBuffer);
@@ -1297,12 +1500,10 @@ class Doc extends Observable {
     this.store = new StructStore();
     /**
      * @type {Transaction | null}
-     * @private
      */
     this._transaction = null;
     /**
      * @type {Array<Transaction>}
-     * @private
      */
     this._transactionCleanups = [];
   }
@@ -1363,6 +1564,7 @@ class Doc extends Observable {
         t._map = type._map;
         type._map.forEach(/** @param {Item?} n */ n => {
           for (; n !== null; n = n.left) {
+            // @ts-ignore
             n.parent = t;
           }
         });
@@ -1428,8 +1630,6 @@ class Doc extends Observable {
 
   /**
    * Emit `destroy` event and unregister all event handlers.
-   *
-   * @protected
    */
   destroy () {
     this.emit('destroyed', [true]);
@@ -1848,6 +2048,83 @@ const encodeStateVector = doc => {
 };
 
 /**
+ * Utility functions for working with EcmaScript objects.
+ *
+ * @module object
+ */
+
+/**
+ * @param {Object<string,any>} obj
+ */
+const keys = Object.keys;
+
+/**
+ * @param {Object<string,any>} obj
+ * @param {function(any,string):any} f
+ */
+const forEach = (obj, f) => {
+  for (const key in obj) {
+    f(obj[key], key);
+  }
+};
+
+/**
+ * @template R
+ * @param {Object<string,any>} obj
+ * @param {function(any,string):R} f
+ * @return {Array<R>}
+ */
+const map$1 = (obj, f) => {
+  const results = [];
+  for (const key in obj) {
+    results.push(f(obj[key], key));
+  }
+  return results
+};
+
+/**
+ * @param {Object<string,any>} obj
+ * @return {number}
+ */
+const length$1 = obj => keys(obj).length;
+
+/**
+ * @param {Object<string,any>} obj
+ * @param {function(any,string):boolean} f
+ * @return {boolean}
+ */
+const every = (obj, f) => {
+  for (const key in obj) {
+    if (!f(obj[key], key)) {
+      return false
+    }
+  }
+  return true
+};
+
+/**
+ * Calls `Object.prototype.hasOwnProperty`.
+ *
+ * @param {any} obj
+ * @param {string|symbol} key
+ * @return {boolean}
+ */
+const hasProperty = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+/**
+ * @param {Object<string,any>} a
+ * @param {Object<string,any>} b
+ * @return {boolean}
+ */
+const equalFlat = (a, b) => a === b || (length$1(a) === length$1(b) && every(a, (val, key) => (val !== undefined || hasProperty(b, key)) && b[key] === val));
+
+/**
+ * Common functions and function call helpers.
+ *
+ * @module function
+ */
+
+/**
  * Calls all functions in `fs` with args. Only throws after all functions were called.
  *
  * @param {Array<function>} fs
@@ -1947,6 +2224,12 @@ const callEventHandlerListeners = (eventHandler, arg0, arg1) =>
   callAll(eventHandler.l, [arg0, arg1]);
 
 /**
+ * Error helpers.
+ *
+ * @module error
+ */
+
+/**
  * @param {string} s
  * @return {Error}
  */
@@ -1954,7 +2237,7 @@ const callEventHandlerListeners = (eventHandler, arg0, arg1) =>
 const create$2 = s => new Error(s);
 
 /**
- * @throws
+ * @throws {Error}
  * @return {never}
  */
 /* istanbul ignore next */
@@ -1963,7 +2246,7 @@ const methodUnimplemented = () => {
 };
 
 /**
- * @throws
+ * @throws {Error}
  * @return {never}
  */
 /* istanbul ignore next */
@@ -2467,13 +2750,11 @@ class Snapshot {
   constructor (ds, sv) {
     /**
      * @type {DeleteSet}
-     * @private
      */
     this.ds = ds;
     /**
      * State Map
      * @type {Map<number,number>}
-     * @private
      */
     this.sv = sv;
   }
@@ -2582,7 +2863,6 @@ class StructStore {
   constructor () {
     /**
      * @type {Map<number,Array<GC|Item>>}
-     * @private
      */
     this.clients = new Map();
     /**
@@ -2592,19 +2872,16 @@ class StructStore {
      * slow in Chrome for arrays with more than 100k elements
      * @see tryResumePendingStructRefs
      * @type {Map<number,{i:number,refs:Array<GCRef|ItemRef>}>}
-     * @private
      */
     this.pendingClientsStructRefs = new Map();
     /**
      * Stack of pending structs waiting for struct dependencies
      * Maximum length of stack is structReaders.size
      * @type {Array<GCRef|ItemRef>}
-     * @private
      */
     this.pendingStack = [];
     /**
      * @type {Array<decoding.Decoder>}
-     * @private
      */
     this.pendingDeleteReaders = [];
   }
@@ -2909,7 +3186,6 @@ class Transaction {
     this.changedParentTypes = new Map();
     /**
      * @type {Set<ID>}
-     * @private
      */
     this._mergeStructs = new Set();
     /**
@@ -3162,7 +3438,6 @@ const cleanupTransactions = (transactionCleanups, i) => {
  * @param {function(Transaction):void} f
  * @param {any} [origin=true]
  *
- * @private
  * @function
  */
 const transact = (doc, f, origin = null, local = true) => {
@@ -3191,7 +3466,78 @@ const transact = (doc, f, origin = null, local = true) => {
   }
 };
 
+/**
+ * Utility module to convert metric values.
+ *
+ * @module metric
+ */
+
+const prefixUp = ['', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
+const prefixDown = ['', 'm', 'μ', 'n', 'p', 'f', 'a', 'z', 'y'];
+
+/**
+ * Calculate the metric prefix for a number. Assumes E.g. `prefix(1000) = { n: 1, prefix: 'k' }`
+ *
+ * @param {number} n
+ * @param {number} [baseMultiplier] Multiplier of the base (10^(3*baseMultiplier)). E.g. `convert(time, -3)` if time is already in milli seconds
+ * @return {{n:number,prefix:string}}
+ */
+const prefix = (n, baseMultiplier = 0) => {
+  const nPow = n === 0 ? 0 : log10(n);
+  let mult = 0;
+  while (nPow < mult * 3 && baseMultiplier > -8) {
+    baseMultiplier--;
+    mult--;
+  }
+  while (nPow >= 3 + mult * 3 && baseMultiplier < 8) {
+    baseMultiplier++;
+    mult++;
+  }
+  const prefix = baseMultiplier < 0 ? prefixDown[-baseMultiplier] : prefixUp[baseMultiplier];
+  return {
+    n: round((mult > 0 ? n / exp10(mult * 3) : n * exp10(mult * -3)) * 1e12) / 1e12,
+    prefix
+  }
+};
+
+/**
+ * Utility module to work with time.
+ *
+ * @module time
+ */
+
+/**
+ * Return current unix time.
+ *
+ * @return {number}
+ */
 const getUnixTime = Date.now;
+
+/**
+ * Transform time (in ms) to a human readable format. E.g. 1100 => 1.1s. 60s => 1min. .001 => 10μs.
+ *
+ * @param {number} d duration in milliseconds
+ * @return {string} humanized approximation of time
+ */
+const humanizeDuration = d => {
+  if (d < 60000) {
+    const p = prefix(d, -1);
+    return round(p.n * 100) / 100 + p.prefix + 's'
+  }
+  d = floor(d / 1000);
+  const seconds = d % 60;
+  const minutes = floor(d / 60) % 60;
+  const hours = floor(d / 3600) % 24;
+  const days = floor(d / 86400);
+  if (days > 0) {
+    return days + 'd' + ((hours > 0 || minutes > 30) ? ' ' + (minutes > 30 ? hours + 1 : hours) + 'h' : '')
+  }
+  if (hours > 0) {
+    /* istanbul ignore next */
+    return hours + 'h' + ((minutes > 0 || seconds > 30) ? ' ' + (seconds > 30 ? minutes + 1 : minutes) + 'min' : '')
+  }
+  return minutes + 'min' + (seconds > 0 ? ' ' + seconds + 's' : '')
+};
 
 class StackItem {
   /**
@@ -3678,10 +4024,9 @@ const getPathTo = (parent, child) => {
 };
 
 /**
- * @template T,R
- * @param {Iterator<T>} iterator
- * @param {function(T):R} f
- * @return {IterableIterator<R>}
+ * Utility module to create and manipulate Iterators.
+ *
+ * @module iterator
  */
 
 /**
@@ -3726,7 +4071,6 @@ const iteratorMap = (iterator, fmap) => createIterator(() => {
 /**
  * Call event listeners with an event. This will also add an event to all
  * parents (for `.observeDeep` handlers).
- * @private
  *
  * @template EventType
  * @param {AbstractType<EventType>} type
@@ -3758,17 +4102,14 @@ class AbstractType {
      */
     this._item = null;
     /**
-     * @private
      * @type {Map<string,Item>}
      */
     this._map = new Map();
     /**
-     * @private
      * @type {Item|null}
      */
     this._start = null;
     /**
-     * @private
      * @type {Doc|null}
      */
     this.doc = null;
@@ -3794,7 +4135,6 @@ class AbstractType {
    *
    * @param {Doc} y The Yjs instance
    * @param {Item|null} item
-   * @private
    */
   _integrate (y, item) {
     this.doc = y;
@@ -3803,7 +4143,6 @@ class AbstractType {
 
   /**
    * @return {AbstractType<EventType>}
-   * @private
    */
   _copy () {
     throw methodUnimplemented()
@@ -3811,7 +4150,6 @@ class AbstractType {
 
   /**
    * @param {encoding.Encoder} encoder
-   * @private
    */
   _write (encoder) { }
 
@@ -3832,8 +4170,6 @@ class AbstractType {
    *
    * @param {Transaction} transaction
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
-   *
-   * @private
    */
   _callObserver (transaction, parentSubs) { /* skip if no type is specified */ }
 
@@ -4348,8 +4684,6 @@ class YArray extends AbstractType {
    *
    * @param {Doc} y The Yjs instance
    * @param {Item} item
-   *
-   * @private
    */
   _integrate (y, item) {
     super._integrate(y, item);
@@ -4370,8 +4704,6 @@ class YArray extends AbstractType {
    *
    * @param {Transaction} transaction
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
-   *
-   * @private
    */
   _callObserver (transaction, parentSubs) {
     callTypeObservers(this, transaction, new YArrayEvent(this, transaction));
@@ -4487,7 +4819,6 @@ class YArray extends AbstractType {
 
   /**
    * @param {encoding.Encoder} encoder
-   * @private
    */
   _write (encoder) {
     writeVarUint(encoder, YArrayRefID);
@@ -4544,8 +4875,6 @@ class YMap extends AbstractType {
    *
    * @param {Doc} y The Yjs instance
    * @param {Item} item
-   *
-   * @private
    */
   _integrate (y, item) {
     super._integrate(y, item);
@@ -4564,8 +4893,6 @@ class YMap extends AbstractType {
    *
    * @param {Transaction} transaction
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
-   *
-   * @private
    */
   _callObserver (transaction, parentSubs) {
     callTypeObservers(this, transaction, new YMapEvent(this, transaction, parentSubs));
@@ -4696,8 +5023,6 @@ class YMap extends AbstractType {
 
   /**
    * @param {encoding.Encoder} encoder
-   *
-   * @private
    */
   _write (encoder) {
     writeVarUint(encoder, YMapRefID);
@@ -4711,71 +5036,6 @@ class YMap extends AbstractType {
  * @function
  */
 const readYMap = decoder => new YMap();
-
-/**
- * @param {Object<string,any>} obj
- */
-const keys = Object.keys;
-
-/**
- * @param {Object<string,any>} obj
- * @param {function(any,string):any} f
- */
-const forEach = (obj, f) => {
-  for (const key in obj) {
-    f(obj[key], key);
-  }
-};
-
-/**
- * @template R
- * @param {Object<string,any>} obj
- * @param {function(any,string):R} f
- * @return {Array<R>}
- */
-const map$1 = (obj, f) => {
-  const results = [];
-  for (const key in obj) {
-    results.push(f(obj[key], key));
-  }
-  return results
-};
-
-/**
- * @param {Object<string,any>} obj
- * @return {number}
- */
-const length$1 = obj => keys(obj).length;
-
-/**
- * @param {Object<string,any>} obj
- * @param {function(any,string):boolean} f
- * @return {boolean}
- */
-const every = (obj, f) => {
-  for (const key in obj) {
-    if (!f(obj[key], key)) {
-      return false
-    }
-  }
-  return true
-};
-
-/**
- * Calls `Object.prototype.hasOwnProperty`.
- *
- * @param {any} obj
- * @param {string|symbol} key
- * @return {boolean}
- */
-const hasProperty = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
-
-/**
- * @param {Object<string,any>} a
- * @param {Object<string,any>} b
- * @return {boolean}
- */
-const equalFlat = (a, b) => a === b || (length$1(a) === length$1(b) && every(a, (val, key) => (val !== undefined || hasProperty(b, key)) && b[key] === val));
 
 /**
  * @param {any} a
@@ -5001,7 +5261,7 @@ const insertText = (transaction, parent, left, right, currentAttributes, text, a
   left = insertPos.left;
   right = insertPos.right;
   // insert content
-  const content = text.constructor === String ? new ContentString(text) : new ContentEmbed(text);
+  const content = text.constructor === String ? new ContentString(/** @type {string} */ (text)) : new ContentEmbed(text);
   left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, content);
   left.integrate(transaction);
   return insertNegatedAttributes(transaction, parent, left, insertPos.right, insertPos.negatedAttributes)
@@ -5151,7 +5411,6 @@ class YTextEvent extends YEvent {
   constructor (ytext, transaction) {
     super(ytext, transaction);
     /**
-     * @private
      * @type {Array<DeltaItem>|null}
      */
     this._delta = null;
@@ -5363,7 +5622,6 @@ class YText extends AbstractType {
     /**
      * Array of pending operations on this type
      * @type {Array<function():void>?}
-     * @private
      */
     this._pending = string !== undefined ? [() => this.insert(0, string)] : [];
   }
@@ -5380,8 +5638,6 @@ class YText extends AbstractType {
   /**
    * @param {Doc} y
    * @param {Item} item
-   *
-   * @private
    */
   _integrate (y, item) {
     super._integrate(y, item);
@@ -5402,8 +5658,6 @@ class YText extends AbstractType {
    *
    * @param {Transaction} transaction
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
-   *
-   * @private
    */
   _callObserver (transaction, parentSubs) {
     callTypeObservers(this, transaction, new YTextEvent(this, transaction));
@@ -5551,12 +5805,24 @@ class YText extends AbstractType {
               str += /** @type {ContentString} */ (n.content).str;
               break
             }
-            case ContentEmbed:
+            case ContentEmbed: {
               packStr();
-              ops.push({
+              /**
+               * @type {Object<string,any>}
+               */
+              const op = {
                 insert: /** @type {ContentEmbed} */ (n.content).embed
-              });
+              };
+              if (currentAttributes.size > 0) {
+                const attrs = /** @type {Object<string,any>} */ ({});
+                op.attributes = attrs;
+                for (const [key, value] of currentAttributes) {
+                  attrs[key] = value;
+                }
+              }
+              ops.push(op);
               break
+            }
             case ContentFormat:
               if (isVisible(n, snapshot)) {
                 packStr();
@@ -5568,7 +5834,6 @@ class YText extends AbstractType {
         n = n.right;
       }
       packStr();
-      debugger
     }, splitSnapshotAffectedStructs);
     return ops
   }
@@ -5678,8 +5943,6 @@ class YText extends AbstractType {
 
   /**
    * @param {encoding.Encoder} encoder
-   *
-   * @private
    */
   _write (encoder) {
     writeVarUint(encoder, YTextRefID);
@@ -5806,7 +6069,6 @@ class YXmlFragment extends AbstractType {
     super();
     /**
      * @type {Array<any>|null}
-     * @private
      */
     this._prelimContent = [];
   }
@@ -5820,7 +6082,6 @@ class YXmlFragment extends AbstractType {
    *
    * @param {Doc} y The Yjs instance
    * @param {Item} item
-   * @private
    */
   _integrate (y, item) {
     super._integrate(y, item);
@@ -5903,7 +6164,6 @@ class YXmlFragment extends AbstractType {
 
   /**
    * Creates YXmlEvent and calls observers.
-   * @private
    *
    * @param {Transaction} transaction
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
@@ -6007,7 +6267,6 @@ class YXmlFragment extends AbstractType {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @private
    * @param {encoding.Encoder} encoder The encoder to write data to.
    */
   _write (encoder) {
@@ -6037,7 +6296,6 @@ class YXmlElement extends YXmlFragment {
     this.nodeName = nodeName;
     /**
      * @type {Map<string, any>|null}
-     * @private
      */
     this._prelimAttrs = new Map();
   }
@@ -6051,7 +6309,6 @@ class YXmlElement extends YXmlFragment {
    *
    * @param {Doc} y The Yjs instance
    * @param {Item} item
-   * @private
    */
   _integrate (y, item) {
     super._integrate(y, item)
@@ -6065,7 +6322,6 @@ class YXmlElement extends YXmlFragment {
    * Creates an Item with the same effect as this Item (without position effect)
    *
    * @return {YXmlElement}
-   * @private
    */
   _copy () {
     return new YXmlElement(this.nodeName)
@@ -6194,7 +6450,6 @@ class YXmlElement extends YXmlFragment {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @private
    * @param {encoding.Encoder} encoder The encoder to write data to.
    */
   _write (encoder) {
@@ -6207,7 +6462,6 @@ class YXmlElement extends YXmlFragment {
  * @param {decoding.Decoder} decoder
  * @return {YXmlElement}
  *
- * @private
  * @function
  */
 const readYXmlElement = decoder => new YXmlElement(readVarString(decoder));
@@ -6265,8 +6519,6 @@ class YXmlHook extends YMap {
 
   /**
    * Creates an Item with the same effect as this Item (without position effect)
-   *
-   * @private
    */
   _copy () {
     return new YXmlHook(this.hookName)
@@ -6309,8 +6561,6 @@ class YXmlHook extends YMap {
    * This is called when this Item is sent to a remote peer.
    *
    * @param {encoding.Encoder} encoder The encoder to write data to.
-   *
-   * @private
    */
   _write (encoder) {
     super._write(encoder);
@@ -6404,8 +6654,6 @@ class YXmlText extends YText {
 
   /**
    * @param {encoding.Encoder} encoder
-   *
-   * @private
    */
   _write (encoder) {
     writeVarUint(encoder, YXmlTextRefID);
@@ -6421,9 +6669,6 @@ class YXmlText extends YText {
  */
 const readYXmlText = decoder => new YXmlText();
 
-/**
- * @private
- */
 class AbstractStruct {
   /**
    * @param {ID} id
@@ -6455,7 +6700,6 @@ class AbstractStruct {
    * @param {encoding.Encoder} encoder The encoder to write data to.
    * @param {number} offset
    * @param {number} encodingRef
-   * @private
    */
   write (encoder, offset, encodingRef) {
     throw methodUnimplemented()
@@ -6469,9 +6713,6 @@ class AbstractStruct {
   }
 }
 
-/**
- * @private
- */
 class AbstractStructRef {
   /**
    * @param {ID} id
@@ -6586,9 +6827,6 @@ class GCRef extends AbstractStructRef {
   }
 }
 
-/**
- * @private
- */
 class ContentBinary {
   /**
    * @param {Uint8Array} content
@@ -6671,16 +6909,11 @@ class ContentBinary {
 }
 
 /**
- * @private
- *
  * @param {decoding.Decoder} decoder
  * @return {ContentBinary}
  */
 const readContentBinary = decoder => new ContentBinary(copyUint8Array(readVarUint8Array(decoder)));
 
-/**
- * @private
- */
 class ContentDeleted {
   /**
    * @param {number} len
@@ -6957,8 +7190,6 @@ class ContentFormat {
 }
 
 /**
- * @private
- *
  * @param {decoding.Decoder} decoder
  * @return {ContentFormat}
  */
@@ -7079,9 +7310,6 @@ const readContentJSON = decoder => {
   return new ContentJSON(cs)
 };
 
-/**
- * @private
- */
 class ContentAny {
   /**
    * @param {Array<any>} arr
@@ -7175,8 +7403,6 @@ class ContentAny {
 }
 
 /**
- * @private
- *
  * @param {decoding.Decoder} decoder
  * @return {ContentAny}
  */
@@ -7716,7 +7942,6 @@ class Item extends AbstractStruct {
 
   /**
    * @param {Transaction} transaction
-   * @private
    */
   integrate (transaction) {
     const store = transaction.doc.store;
@@ -7815,7 +8040,6 @@ class Item extends AbstractStruct {
 
   /**
    * Returns the next non-deleted item
-   * @private
    */
   get next () {
     let n = this.right;
@@ -7827,7 +8051,6 @@ class Item extends AbstractStruct {
 
   /**
    * Returns the previous non-deleted item
-   * @private
    */
   get prev () {
     let n = this.left;
@@ -7898,8 +8121,6 @@ class Item extends AbstractStruct {
   /**
    * @param {StructStore} store
    * @param {boolean} parentGCd
-   *
-   * @private
    */
   gc (store, parentGCd) {
     if (!this.deleted) {
@@ -7921,8 +8142,6 @@ class Item extends AbstractStruct {
    *
    * @param {encoding.Encoder} encoder The encoder to write data to.
    * @param {number} offset
-   *
-   * @private
    */
   write (encoder, offset) {
     const origin = offset > 0 ? createID(this.id.client, this.id.clock + offset - 1) : this.origin;
@@ -8196,7 +8415,24 @@ class ItemRef extends AbstractStructRef {
   }
 }
 
+/**
+ * Utility module to work with EcmaScript Symbols.
+ *
+ * @module symbol
+ */
+
+/**
+ * Return fresh symbol.
+ *
+ * @return {Symbol}
+ */
 const create$3 = Symbol;
+
+/**
+ * Working with value pairs.
+ *
+ * @module pair
+ */
 
 /**
  * @template L,R
@@ -8230,6 +8466,9 @@ const forEach$1 = (arr, f) => arr.forEach(p => f(p.left, p.right));
 /* eslint-env browser */
 
 /* istanbul ignore next */
+/**
+ * @type {Document}
+ */
 const doc = /** @type {Document} */ (typeof document !== 'undefined' ? document : {});
 
 /**
@@ -8331,7 +8570,27 @@ const text = createTextNode;
 /* istanbul ignore next */
 const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
 
+/**
+ * JSON utility functions.
+ *
+ * @module json
+ */
+
+/**
+ * Transform JavaScript object to JSON.
+ *
+ * @param {any} object
+ * @return {string}
+ */
 const stringify = JSON.stringify;
+
+/* global requestIdleCallback, requestAnimationFrame, cancelIdleCallback, cancelAnimationFrame */
+
+/**
+ * Utility module to work with EcmaScript's event loop.
+ *
+ * @module eventloop
+ */
 
 /**
  * @type {Array<function>}
@@ -8354,6 +8613,12 @@ const enqueue = f => {
     setTimeout(_runQueue, 0);
   }
 };
+
+/**
+ * Isomorphic logging module with support for colors!
+ *
+ * @module logging
+ */
 
 const BOLD = create$3();
 const UNBOLD = create$3();
@@ -8843,11 +9108,12 @@ int main(void)
 */
 
 /**
- * @module prng
+ * Fast Pseudo Random Number Generators.
  *
  * Given a seed a PRNG generates a sequence of numbers that cannot be reasonably predicted.
  * Two PRNGs must generate the same random sequence of numbers if  given the same seed.
  *
+ * @module prng
  */
 
 /**
@@ -8933,6 +9199,12 @@ const utf16String = (gen, maxlen = 20) => {
 const oneOf = (gen, array) => array[int31(gen, 0, array.length - 1)];
 
 /**
+ * Utility helpers for generating statistics.
+ *
+ * @module statistics
+ */
+
+/**
  * @param {Array<number>} arr Array of values
  * @return {number} Returns null if the array is empty
  */
@@ -8945,6 +9217,47 @@ const median = arr => arr.length === 0 ? NaN : (arr.length % 2 === 1 ? arr[(arr.
 const average = arr => arr.reduce(add, 0) / arr.length;
 
 /**
+ * Testing framework with support for generating tests.
+ *
+ * ```js
+ * // test.js template for creating a test executable
+ * import { runTests } from 'lib0/testing.js'
+ * import * as log from 'lib0/logging.js'
+ * import * as mod1 from './mod1.test.js'
+ * import * as mod2 from './mod2.test.js'
+
+ * import { isBrowser, isNode } from 'lib0/environment.js'
+ *
+ * if (isBrowser) {
+ *   // optional: if this is ran in the browser, attach a virtual console to the dom
+ *   log.createVConsole(document.body)
+ * }
+ *
+ * runTests({
+ *  mod1,
+ *  mod2,
+ * }).then(success => {
+ *   if (isNode) {
+ *     process.exit(success ? 0 : 1)
+ *   }
+ * })
+ * ```
+ *
+ * ```js
+ * // mod1.test.js
+ * /**
+ *  * runTests automatically tests all exported functions that start with "test".
+ *  * The name of the function should be in camelCase and is used for the logging output.
+ *  *
+ *  * @param {t.TestCase} tc
+ *  *\/
+ * export const testMyFirstTest = tc => {
+ *   t.compare({ a: 4 }, { a: 4 }, 'objects are equal')
+ * }
+ * ```
+ *
+ * Now you can simply run `node test.js` to run your test or run test.js in the browser.
+ *
  * @module testing
  */
 
@@ -8959,7 +9272,13 @@ class TestCase {
    * @param {string} testName
    */
   constructor (moduleName, testName) {
+    /**
+     * @type {string}
+     */
     this.moduleName = moduleName;
+    /**
+     * @type {string}
+     */
     this.testName = testName;
     this._seed = null;
     this._prng = null;
@@ -8970,6 +9289,9 @@ class TestCase {
     this._prng = null;
   }
 
+  /**
+   * @type {number}
+   */
   /* istanbul ignore next */
   get seed () {
     /* istanbul ignore else */
@@ -8980,6 +9302,11 @@ class TestCase {
     return this._seed
   }
 
+  /**
+   * A PRNG for this test case. Use only this PRNG for randomness to make the test case reproducible.
+   *
+   * @type {prng.PRNG}
+   */
   get prng () {
     /* istanbul ignore else */
     if (this._prng === null) {
@@ -9056,11 +9383,11 @@ const run = async (moduleName, name, f, i, numberOfTests) => {
   times.sort((a, b) => a - b);
   /* istanbul ignore next */
   const againMessage = isBrowser
-    ? `     - ${window.location.protocol}//${window.location.host}?filter=\\[${i + 1}/${tc._seed === null ? '' : `&seed=${tc._seed}`}`
+    ? `     - ${window.location.href}?filter=\\[${i + 1}/${tc._seed === null ? '' : `&seed=${tc._seed}`}`
     : `\nrepeat: npm run test -- --filter "\\[${i + 1}/" ${tc._seed === null ? '' : `--seed ${tc._seed}`}`;
   const timeInfo = (repeat && err === null)
-    ? ` - ${times.length} repititions in ${duration.toFixed(2)}ms (best: ${times[0].toFixed(2)}ms, worst: ${last(times).toFixed(2)}ms, median: ${median(times).toFixed(2)}ms, average: ${average(times).toFixed(2)}ms)`
-    : ` in ${duration.toFixed(2)}ms`;
+    ? ` - ${times.length} repititions in ${humanizeDuration(duration)} (best: ${humanizeDuration(times[0])}, worst: ${humanizeDuration(last(times))}, median: ${humanizeDuration(median(times))}, average: ${humanizeDuration(average(times))})`
+    : ` in ${humanizeDuration(duration)}`;
   if (err !== null) {
     /* istanbul ignore else */
     if (err.constructor === SkipError) {
@@ -9076,6 +9403,14 @@ const run = async (moduleName, name, f, i, numberOfTests) => {
 };
 
 /**
+ * Describe what you are currently testing. The message will be logged.
+ *
+ * ```js
+ * export const testMyFirstTest = tc => {
+ *   t.describe('crunching numbers', 'already crunched 4 numbers!') // the optional second argument can describe the state.
+ * }
+ * ```
+ *
  * @param {string} description
  * @param {string} info
  */
@@ -9274,9 +9609,10 @@ const runTests = async tests => {
   const end = performance.now();
   print('');
   const success = successfulTests === numberOfTests;
-  /* istanbul ignore else */
+  /* istanbul ignore next */
   if (success) {
-    print(GREEN, BOLD, 'All tests successful!', GREY, UNBOLD, ` in ${(end - start).toFixed(2)}ms`);
+    /* istanbul ignore next */
+    print(GREEN, BOLD, 'All tests successful!', GREY, UNBOLD, ` in ${humanizeDuration(end - start)}`);
     /* istanbul ignore next */
     printImgBase64(nyanCatImage, 50);
   } else {
@@ -11286,6 +11622,28 @@ const testToJson = tc => {
   assert(text0.toJSON() === 'abc', 'toJSON returns the unformatted text');
 };
 
+/**
+ * @param {t.TestCase} tc
+ */
+const testToDeltaEmbedAttributes = tc => {
+  const { text0 } = init$1(tc, { users: 1 });
+  text0.insert(0, 'ab', { bold: true });
+  text0.insertEmbed(1, { image: 'imageSrc.png' }, { width: 100 });
+  const delta0 = text0.toDelta();
+  compare(delta0, [{ insert: 'a', attributes: { bold: true } }, { insert: { image: 'imageSrc.png' }, attributes: { width: 100 } }, { insert: 'b', attributes: { bold: true } }]);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testToDeltaEmbedNoAttributes = tc => {
+  const { text0 } = init$1(tc, { users: 1 });
+  text0.insert(0, 'ab', { bold: true });
+  text0.insertEmbed(1, { image: 'imageSrc.png' });
+  const delta0 = text0.toDelta();
+  compare(delta0, [{ insert: 'a', attributes: { bold: true } }, { insert: { image: 'imageSrc.png' } }, { insert: 'b', attributes: { bold: true } }], 'toDelta does not set attributes key when no attributes are present');
+};
+
 var text$1 = /*#__PURE__*/Object.freeze({
   __proto__: null,
   testBasicInsertAndDelete: testBasicInsertAndDelete,
@@ -11293,7 +11651,9 @@ var text$1 = /*#__PURE__*/Object.freeze({
   testGetDeltaWithEmbeds: testGetDeltaWithEmbeds,
   testSnapshot: testSnapshot,
   testSnapshotDeleteAfter: testSnapshotDeleteAfter,
-  testToJson: testToJson
+  testToJson: testToJson,
+  testToDeltaEmbedAttributes: testToDeltaEmbedAttributes,
+  testToDeltaEmbedNoAttributes: testToDeltaEmbedNoAttributes
 });
 
 /**

@@ -10,14 +10,12 @@ export class YXmlElement extends YXmlFragment {
     nodeName: string;
     /**
      * @type {Map<string, any>|null}
-     * @private
      */
     _prelimAttrs: Map<string, any> | null;
     /**
      * Creates an Item with the same effect as this Item (without position effect)
      *
      * @return {YXmlElement}
-     * @private
      */
     _copy(): YXmlElement;
     /**

@@ -31,8 +31,6 @@ export class YArray<T> extends AbstractType<YArrayEvent<T>> {
      *
      * @param {Doc} y The Yjs instance
      * @param {Item} item
-     *
-     * @private
      */
     _integrate(y: Doc, item: Item): void;
     _copy(): YArray<any>;

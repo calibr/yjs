@@ -9,17 +9,14 @@ export class AbstractType<EventType> {
      */
     _item: Item | null;
     /**
-     * @private
      * @type {Map<string,Item>}
      */
     _map: Map<string, Item>;
     /**
-     * @private
      * @type {Item|null}
      */
     _start: Item | null;
     /**
-     * @private
      * @type {Doc|null}
      */
     doc: Doc | null;
@@ -43,17 +40,14 @@ export class AbstractType<EventType> {
      *
      * @param {Doc} y The Yjs instance
      * @param {Item|null} item
-     * @private
      */
     _integrate(y: Doc, item: Item | null): void;
     /**
      * @return {AbstractType<EventType>}
-     * @private
      */
     _copy(): AbstractType<EventType>;
     /**
      * @param {encoding.Encoder} encoder
-     * @private
      */
     _write(encoder: encoding.Encoder): void;
     /**
@@ -66,8 +60,6 @@ export class AbstractType<EventType> {
      *
      * @param {Transaction} transaction
      * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
-     *
-     * @private
      */
     _callObserver(transaction: Transaction, parentSubs: Set<string | null>): void;
     /**

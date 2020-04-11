@@ -61,7 +61,6 @@ export class YXmlTreeWalker {
 export class YXmlFragment extends AbstractType<YXmlEvent> {
     /**
      * @type {Array<any>|null}
-     * @private
      */
     _prelimContent: Array<any> | null;
     /**
@@ -73,7 +72,6 @@ export class YXmlFragment extends AbstractType<YXmlEvent> {
      *
      * @param {Doc} y The Yjs instance
      * @param {Item} item
-     * @private
      */
     _integrate(y: Doc, item: Item): void;
     _copy(): YXmlFragment;

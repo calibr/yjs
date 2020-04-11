@@ -6,13 +6,11 @@ export class Snapshot {
     constructor(ds: DeleteSet, sv: Map<number, number>);
     /**
      * @type {DeleteSet}
-     * @private
      */
     ds: DeleteSet;
     /**
      * State Map
      * @type {Map<number,number>}
-     * @private
      */
     sv: Map<number, number>;
 }

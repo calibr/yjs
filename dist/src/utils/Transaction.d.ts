@@ -64,7 +64,6 @@ export class Transaction {
     changedParentTypes: Map<AbstractType<YEvent>, Array<YEvent>>;
     /**
      * @type {Set<ID>}
-     * @private
      */
     _mergeStructs: Set<ID>;
     /**

@@ -67,7 +67,6 @@ export class YTextEvent extends YEvent {
      */
     constructor(ytext: YText, transaction: Transaction);
     /**
-     * @private
      * @type {Array<DeltaItem>|null}
      */
     _delta: Array<DeltaItem> | null;
@@ -98,7 +97,6 @@ export class YText extends AbstractType<YTextEvent> {
     /**
      * Array of pending operations on this type
      * @type {Array<function():void>?}
-     * @private
      */
     _pending: Array<() => void> | null;
     /**
@@ -110,8 +108,6 @@ export class YText extends AbstractType<YTextEvent> {
     /**
      * @param {Doc} y
      * @param {Item} item
-     *
-     * @private
      */
     _integrate(y: Doc, item: Item): void;
     _copy(): YText;

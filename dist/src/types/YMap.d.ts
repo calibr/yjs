@@ -33,8 +33,6 @@ export class YMap<T> extends AbstractType<YMapEvent<T>> {
      *
      * @param {Doc} y The Yjs instance
      * @param {Item} item
-     *
-     * @private
      */
     _integrate(y: Doc, item: Item): void;
     _copy(): YMap<any>;

@@ -1,6 +1,3 @@
-/**
- * @private
- */
 export class ContentDeleted {
     /**
      * @param {number} len

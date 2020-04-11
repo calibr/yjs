@@ -22,12 +22,10 @@ export class Doc extends Observable<string> {
     store: StructStore;
     /**
      * @type {Transaction | null}
-     * @private
      */
     _transaction: Transaction | null;
     /**
      * @type {Array<Transaction>}
-     * @private
      */
     _transactionCleanups: Array<Transaction>;
     /**

@@ -1,6 +1,3 @@
-/**
- * @private
- */
 export class ContentBinary {
     /**
      * @param {Uint8Array} content

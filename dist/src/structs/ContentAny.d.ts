@@ -1,6 +1,3 @@
-/**
- * @private
- */
 export class ContentAny {
     /**
      * @param {Array<any>} arr

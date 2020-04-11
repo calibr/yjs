@@ -23,7 +23,6 @@ export class DeleteItem {
 export class DeleteSet {
     /**
      * @type {Map<number,Array<DeleteItem>>}
-     * @private
      */
     clients: Map<number, Array<DeleteItem>>;
 }

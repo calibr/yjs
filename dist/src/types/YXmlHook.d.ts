@@ -14,8 +14,6 @@ export class YXmlHook extends YMap<any> {
     hookName: string;
     /**
      * Creates an Item with the same effect as this Item (without position effect)
-     *
-     * @private
      */
     _copy(): YXmlHook;
     /**

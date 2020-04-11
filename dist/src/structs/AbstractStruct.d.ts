@@ -1,6 +1,3 @@
-/**
- * @private
- */
 export class AbstractStruct {
     /**
      * @param {ID} id
@@ -27,7 +24,6 @@ export class AbstractStruct {
      * @param {encoding.Encoder} encoder The encoder to write data to.
      * @param {number} offset
      * @param {number} encodingRef
-     * @private
      */
     write(encoder: encoding.Encoder, offset: number, encodingRef: number): void;
     /**
@@ -35,9 +31,6 @@ export class AbstractStruct {
      */
     integrate(transaction: Transaction): void;
 }
-/**
- * @private
- */
 export class AbstractStructRef {
     /**
      * @param {ID} id

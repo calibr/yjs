@@ -13,6 +13,7 @@ var binary = require('lib0/dist/binary.cjs');
 var f = require('lib0/dist/function.cjs');
 var error = require('lib0/dist/error.cjs');
 var set = require('lib0/dist/set.cjs');
+var logging = require('lib0/dist/logging.cjs');
 var time = require('lib0/dist/time.cjs');
 var iterator = require('lib0/dist/iterator.cjs');
 var object = require('lib0/dist/object.cjs');
@@ -320,6 +321,8 @@ const readAndApplyDeleteSet = (decoder, transaction, store) => {
  * @module Y
  */
 
+const generateNewClientId = random.uint32;
+
 /**
  * A Yjs instance handles the state of shared data.
  * @extends Observable<string>
@@ -334,7 +337,7 @@ class Doc extends observable_js.Observable {
     super();
     this.gc = gc;
     this.gcFilter = gcFilter;
-    this.clientID = random.uint32();
+    this.clientID = generateNewClientId();
     /**
      * @type {Map<string, AbstractType<YEvent>>}
      */
@@ -366,17 +369,17 @@ class Doc extends observable_js.Observable {
   }
 
   /**
-   * Define a shared data type.
+   * Get a shared data type by name. If it does not yet exist, define its type.
    *
    * Multiple calls of `y.get(name, TypeConstructor)` yield the same result
-   * and do not overwrite each other. I.e.
-   * `y.define(name, Y.Array) === y.define(name, Y.Array)`
+   * and do not overwrite each other, i.e.
+   *   `y.get(name, Y.Array) === y.get(name, Y.Array)`
    *
    * After this method is called, the type is also available on `y.share.get(name)`.
    *
    * *Best Practices:*
    * Define all types right after the Yjs instance is created and store them in a separate object.
-   * Also use the typed methods `getText(name)`, `getArray(name)`, ..
+   * Also use the typed methods `getText(name)`, `getArray(name)`, `getMap(name)`, etc.
    *
    * @example
    *   const y = new Y(..)
@@ -497,7 +500,7 @@ class Doc extends observable_js.Observable {
 
 /**
  * @param {encoding.Encoder} encoder
- * @param {Array<AbstractStruct>} structs All structs by `client`
+ * @param {Array<GC|Item>} structs All structs by `client`
  * @param {number} client
  * @param {number} clock write structs starting with `ID(client,clock)`
  *
@@ -511,33 +514,10 @@ const writeStructs = (encoder, structs, client, clock) => {
   writeID(encoder, createID(client, clock));
   const firstStruct = structs[startNewStructs];
   // write first struct with an offset
-  firstStruct.write(encoder, clock - firstStruct.id.clock, 0);
+  firstStruct.write(encoder, clock - firstStruct.id.clock);
   for (let i = startNewStructs + 1; i < structs.length; i++) {
-    structs[i].write(encoder, 0, 0);
+    structs[i].write(encoder, 0);
   }
-};
-
-/**
- * @param {decoding.Decoder} decoder
- * @param {number} numOfStructs
- * @param {ID} nextID
- * @return {Array<GCRef|ItemRef>}
- *
- * @private
- * @function
- */
-const readStructRefs = (decoder, numOfStructs, nextID) => {
-  /**
-   * @type {Array<GCRef|ItemRef>}
-   */
-  const refs = [];
-  for (let i = 0; i < numOfStructs; i++) {
-    const info = decoding.readUint8(decoder);
-    const ref = (binary.BITS5 & info) === 0 ? new GCRef(decoder, nextID, info) : new ItemRef(decoder, nextID, info);
-    nextID = createID(nextID.client, nextID.clock + ref.length);
-    refs.push(ref);
-  }
-  return refs
 };
 
 /**
@@ -564,7 +544,9 @@ const writeClientsStructs = (encoder, store, _sm) => {
   });
   // write # states that were updated
   encoding.writeVarUint(encoder, sm.size);
-  sm.forEach((clock, client) => {
+  // Write items with higher client ids first
+  // This heavily improves the conflict algorithm.
+  Array.from(sm.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
     // @ts-ignore
     writeStructs(encoder, store.clients.get(client), client, clock);
   });
@@ -572,22 +554,30 @@ const writeClientsStructs = (encoder, store, _sm) => {
 
 /**
  * @param {decoding.Decoder} decoder The decoder object to read data from.
- * @return {Map<number,Array<GCRef|ItemRef>>}
+ * @param {Map<number,Array<GC|Item>>} clientRefs
+ * @param {Doc} doc
+ * @return {Map<number,Array<GC|Item>>}
  *
  * @private
  * @function
  */
-const readClientsStructRefs = decoder => {
-  /**
-   * @type {Map<number,Array<GCRef|ItemRef>>}
-   */
-  const clientRefs = new Map();
+const readClientsStructRefs = (decoder, clientRefs, doc) => {
   const numOfStateUpdates = decoding.readVarUint(decoder);
   for (let i = 0; i < numOfStateUpdates; i++) {
     const numberOfStructs = decoding.readVarUint(decoder);
-    const nextID = readID(decoder);
-    const refs = readStructRefs(decoder, numberOfStructs, nextID);
-    clientRefs.set(nextID.client, refs);
+    /**
+     * @type {Array<GC|Item>}
+     */
+    const refs = [];
+    let { client, clock } = readID(decoder);
+    let info, struct;
+    clientRefs.set(client, refs);
+    for (let i = 0; i < numberOfStructs; i++) {
+      info = decoding.readUint8(decoder);
+      struct = (binary.BITS5 & info) === 0 ? new GC(createID(client, clock), decoding.readVarUint(decoder)) : readItem(decoder, createID(client, clock), info, doc);
+      refs.push(struct);
+      clock += struct.length;
+    }
   }
   return clientRefs
 };
@@ -620,28 +610,36 @@ const readClientsStructRefs = decoder => {
 const resumeStructIntegration = (transaction, store) => {
   const stack = store.pendingStack;
   const clientsStructRefs = store.pendingClientsStructRefs;
+  // sort them so that we take the higher id first, in case of conflicts the lower id will probably not conflict with the id from the higher user.
+  const clientsStructRefsIds = Array.from(clientsStructRefs.keys()).sort((a, b) => a - b);
+  let curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
   // iterate over all struct readers until we are done
-  while (stack.length !== 0 || clientsStructRefs.size !== 0) {
+  while (stack.length !== 0 || clientsStructRefsIds.length > 0) {
     if (stack.length === 0) {
       // take any first struct from clientsStructRefs and put it on the stack
-      const [client, structRefs] = clientsStructRefs.entries().next().value;
-      stack.push(structRefs.refs[structRefs.i++]);
-      if (structRefs.refs.length === structRefs.i) {
-        clientsStructRefs.delete(client);
+      if (curStructsTarget.i < curStructsTarget.refs.length) {
+        stack.push(curStructsTarget.refs[curStructsTarget.i++]);
+      } else {
+        clientsStructRefsIds.pop();
+        if (clientsStructRefsIds.length > 0) {
+          curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
+        }
+        continue
       }
     }
     const ref = stack[stack.length - 1];
-    const m = ref._missing;
-    const client = ref.id.client;
+    const refID = ref.id;
+    const client = refID.client;
+    const refClock = refID.clock;
     const localClock = getState(store, client);
-    const offset = ref.id.clock < localClock ? localClock - ref.id.clock : 0;
-    if (ref.id.clock + offset !== localClock) {
+    const offset = refClock < localClock ? localClock - refClock : 0;
+    if (refClock + offset !== localClock) {
       // A previous message from this client is missing
       // check if there is a pending structRef with a smaller clock and switch them
-      const structRefs = clientsStructRefs.get(client);
-      if (structRefs !== undefined) {
+      const structRefs = clientsStructRefs.get(client) || { refs: [], i: 0 };
+      if (structRefs.refs.length !== structRefs.i) {
         const r = structRefs.refs[structRefs.i];
-        if (r.id.clock < ref.id.clock) {
+        if (r.id.clock < refClock) {
           // put ref with smaller clock on stack instead and continue
           structRefs.refs[structRefs.i] = ref;
           stack[stack.length - 1] = r;
@@ -654,31 +652,23 @@ const resumeStructIntegration = (transaction, store) => {
       // wait until missing struct is available
       return
     }
-    while (m.length > 0) {
-      const missing = m[m.length - 1];
-      if (getState(store, missing.client) <= missing.clock) {
-        const client = missing.client;
-        // get the struct reader that has the missing struct
-        const structRefs = clientsStructRefs.get(client);
-        if (structRefs === undefined) {
-          // This update message causally depends on another update message.
-          return
-        }
-        stack.push(structRefs.refs[structRefs.i++]);
-        if (structRefs.i === structRefs.refs.length) {
-          clientsStructRefs.delete(client);
-        }
-        break
+    const missing = ref.getMissing(transaction, store);
+    if (missing !== null) {
+      // get the struct reader that has the missing struct
+      const structRefs = clientsStructRefs.get(missing) || { refs: [], i: 0 };
+      if (structRefs.refs.length === structRefs.i) {
+        // This update message causally depends on another update message.
+        return
       }
-      ref._missing.pop();
-    }
-    if (m.length === 0) {
+      stack.push(structRefs.refs[structRefs.i++]);
+    } else {
       if (offset < ref.length) {
-        ref.toStruct(transaction, store, offset).integrate(transaction);
+        ref.integrate(transaction, offset);
       }
       stack.pop();
     }
   }
+  store.pendingClientsStructRefs.clear();
 };
 
 /**
@@ -707,7 +697,7 @@ const writeStructsFromTransaction = (encoder, transaction) => writeClientsStruct
 
 /**
  * @param {StructStore} store
- * @param {Map<number, Array<GCRef|ItemRef>>} clientsStructsRefs
+ * @param {Map<number, Array<GC|Item>>} clientsStructsRefs
  *
  * @private
  * @function
@@ -731,6 +721,21 @@ const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
 };
 
 /**
+ * @param {Map<number,{refs:Array<GC|Item>,i:number}>} pendingClientsStructRefs
+ */
+const cleanupPendingStructs = pendingClientsStructRefs => {
+  // cleanup pendingClientsStructs if not fully finished
+  for (const [client, refs] of pendingClientsStructRefs) {
+    if (refs.i === refs.refs.length) {
+      pendingClientsStructRefs.delete(client);
+    } else {
+      refs.refs.splice(0, refs.i);
+      refs.i = 0;
+    }
+  }
+};
+
+/**
  * Read the next Item in a Decoder and fill this Item with the read data.
  *
  * This is called when data is received from a remote peer.
@@ -743,9 +748,11 @@ const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
  * @function
  */
 const readStructs = (decoder, transaction, store) => {
-  const clientsStructRefs = readClientsStructRefs(decoder);
+  const clientsStructRefs = new Map();
+  readClientsStructRefs(decoder, clientsStructRefs, transaction.doc);
   mergeReadStructsIntoPendingReads(store, clientsStructRefs);
   resumeStructIntegration(transaction, store);
+  cleanupPendingStructs(store.pendingClientsStructRefs);
   tryResumePendingDeleteReaders(transaction, store);
 };
 
@@ -764,7 +771,7 @@ const readUpdate = (decoder, ydoc, transactionOrigin) =>
   transact(ydoc, transaction => {
     readStructs(decoder, transaction, ydoc.store);
     let allowDeletes = true;
-    if (typeof transactionOrigin === 'object' && transactionOrigin.disableDeletes === true) {
+    if (typeof transactionOrigin === 'object' && transactionOrigin && transactionOrigin.disableDeletes === true) {
       allowDeletes = false;
     }
     if (allowDeletes) {
@@ -1057,7 +1064,7 @@ const isParentOf = (parent, child) => {
     if (child.parent === parent) {
       return true
     }
-    child = child.parent._item;
+    child = /** @type {AbstractType<any>} */ (child.parent)._item;
   }
   return false
 };
@@ -1282,7 +1289,7 @@ const createRelativePosition = (type, item) => {
   if (type._item === null) {
     tname = findRootTypeKey(type);
   } else {
-    typeid = type._item.id;
+    typeid = createID(type._item.id.client, type._item.id.clock);
   }
   return new RelativePosition(typeid, tname, item)
 };
@@ -1386,7 +1393,7 @@ const createAbsolutePositionFromRelativePosition = (rpos, doc) => {
     if (!(right instanceof Item)) {
       return null
     }
-    type = right.parent;
+    type = /** @type {AbstractType<any>} */ (right.parent);
     if (type._item === null || !type._item.deleted) {
       index = right.deleted || !right.countable ? 0 : res.diff;
       let n = right.left;
@@ -1559,13 +1566,13 @@ class StructStore {
      * We could shift the array of refs instead, but shift is incredible
      * slow in Chrome for arrays with more than 100k elements
      * @see tryResumePendingStructRefs
-     * @type {Map<number,{i:number,refs:Array<GCRef|ItemRef>}>}
+     * @type {Map<number,{i:number,refs:Array<GC|Item>}>}
      */
     this.pendingClientsStructRefs = new Map();
     /**
      * Stack of pending structs waiting for struct dependencies
      * Maximum length of stack is structReaders.size
-     * @type {Array<GCRef|ItemRef>}
+     * @type {Array<GC|Item>}
      */
     this.pendingStack = [];
     /**
@@ -1634,7 +1641,7 @@ const addStruct = (store, struct) => {
 
 /**
  * Perform a binary search on a sorted array
- * @param {Array<any>} structs
+ * @param {Array<Item|GC>} structs
  * @param {number} clock
  * @return {number}
  *
@@ -1644,10 +1651,18 @@ const addStruct = (store, struct) => {
 const findIndexSS = (structs, clock) => {
   let left = 0;
   let right = structs.length - 1;
+  let mid = structs[right];
+  let midclock = mid.id.clock;
+  if (midclock === clock) {
+    return right
+  }
+  // @todo does it even make sense to pivot the search?
+  // If a good split misses, it might actually increase the time to find the correct item.
+  // Currently, the only advantage is that search with pivoting might find the item on the first try.
+  let midindex = math.floor((clock / (midclock + mid.length - 1)) * right); // pivoting the search
   while (left <= right) {
-    const midindex = math.floor((left + right) / 2);
-    const mid = structs[midindex];
-    const midclock = mid.id.clock;
+    mid = structs[midindex];
+    midclock = mid.id.clock;
     if (midclock <= clock) {
       if (clock < midclock + mid.length) {
         return midindex
@@ -1656,6 +1671,7 @@ const findIndexSS = (structs, clock) => {
     } else {
       right = midindex - 1;
     }
+    midindex = math.floor((left + right) / 2);
   }
   // Always check state before looking for a struct in StructStore
   // Therefore the case of not finding a struct is unexpected
@@ -1683,16 +1699,10 @@ const find = (store, id) => {
 
 /**
  * Expects that id is actually in store. This function throws or is an infinite loop otherwise.
- *
- * @param {StructStore} store
- * @param {ID} id
- * @return {Item}
- *
  * @private
  * @function
  */
-// @ts-ignore
-const getItem = (store, id) => find(store, id);
+const getItem = /** @type {function(StructStore,ID):Item} */ (find);
 
 /**
  * @param {Transaction} transaction
@@ -1855,9 +1865,9 @@ class Transaction {
      */
     this.changedParentTypes = new Map();
     /**
-     * @type {Set<ID>}
+     * @type {Array<AbstractStruct>}
      */
-    this._mergeStructs = new Set();
+    this._mergeStructs = [];
     /**
      * @type {any}
      */
@@ -1890,17 +1900,6 @@ const computeUpdateMessageFromTransaction = transaction => {
 };
 
 /**
- * @param {Transaction} transaction
- *
- * @private
- * @function
- */
-const nextID = transaction => {
-  const y = transaction.doc;
-  return createID(y.clientID, getState(y.store, y.clientID))
-};
-
-/**
  * If `type.parent` was added in current transaction, `type` technically
  * did not change, it was just added and we should not fire events for `type`.
  *
@@ -1925,8 +1924,8 @@ const tryToMergeWithLeft = (structs, pos) => {
   if (left.deleted === right.deleted && left.constructor === right.constructor) {
     if (left.mergeWith(right)) {
       structs.splice(pos, 1);
-      if (right instanceof Item && right.parentSub !== null && right.parent._map.get(right.parentSub) === right) {
-        right.parent._map.set(right.parentSub, /** @type {Item} */ (left));
+      if (right instanceof Item && right.parentSub !== null && /** @type {AbstractType<any>} */ (right.parent)._map.get(right.parentSub) === right) {
+        /** @type {AbstractType<any>} */ (right.parent)._map.set(right.parentSub, /** @type {Item} */ (left));
       }
     }
   }
@@ -1939,7 +1938,7 @@ const tryToMergeWithLeft = (structs, pos) => {
  */
 const tryGcDeleteSet = (ds, store, gcFilter) => {
   for (const [client, deleteItems] of ds.clients) {
-    const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client));
+    const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di];
       const endDeleteItemClock = deleteItem.clock + deleteItem.len;
@@ -1968,7 +1967,7 @@ const tryMergeDeleteSet = (ds, store) => {
   // try to merge deleted / gc'd items
   // merge from right to left for better efficiecy and so we don't miss any merge targets
   for (const [client, deleteItems] of ds.clients) {
-    const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client));
+    const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di];
       // start with merging the item next to the last deleted item
@@ -2004,6 +2003,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
     const doc = transaction.doc;
     const store = doc.store;
     const ds = transaction.deleteSet;
+    const mergeStructs = transaction._mergeStructs;
     try {
       sortAndMergeDeleteSet(ds);
       transaction.afterState = getStateVector(transaction.doc.store);
@@ -2061,7 +2061,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
       for (const [client, clock] of transaction.afterState) {
         const beforeClock = transaction.beforeState.get(client) || 0;
         if (beforeClock !== clock) {
-          const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client));
+          const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
           // we iterate from right to left so we can safely remove entries
           const firstChangePos = math.max(findIndexSS(structs, beforeClock), 1);
           for (let i = structs.length - 1; i >= firstChangePos; i--) {
@@ -2072,10 +2072,9 @@ const cleanupTransactions = (transactionCleanups, i) => {
       // try to merge mergeStructs
       // @todo: it makes more sense to transform mergeStructs to a DS, sort it, and merge from right to left
       //        but at the moment DS does not handle duplicates
-      for (const mid of transaction._mergeStructs) {
-        const client = mid.client;
-        const clock = mid.clock;
-        const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client));
+      for (let i = 0; i < mergeStructs.length; i++) {
+        const { client, clock } = mergeStructs[i].id;
+        const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
         const replacedStructPos = findIndexSS(structs, clock);
         if (replacedStructPos + 1 < structs.length) {
           tryToMergeWithLeft(structs, replacedStructPos + 1);
@@ -2083,6 +2082,10 @@ const cleanupTransactions = (transactionCleanups, i) => {
         if (replacedStructPos > 0) {
           tryToMergeWithLeft(structs, replacedStructPos);
         }
+      }
+      if (!transaction.local && transaction.afterState.get(doc.clientID) !== transaction.beforeState.get(doc.clientID)) {
+        doc.clientID = generateNewClientId();
+        logging.print(logging.ORANGE, logging.BOLD, '[yjs] ', logging.UNBOLD, logging.RED, 'Changed the client-id because another client seems to be using it.');
       }
       // @todo Merge all the transactions into one and provide send the data as a single update message
       doc.emit('afterTransactionCleanup', [transaction, doc]);
@@ -2139,13 +2142,13 @@ const transact = (doc, f, origin = null, local = true) => {
 class StackItem {
   /**
    * @param {DeleteSet} ds
-   * @param {number} start clock start of the local client
-   * @param {number} len
+   * @param {Map<number,number>} beforeState
+   * @param {Map<number,number>} afterState
    */
-  constructor (ds, start, len) {
+  constructor (ds, beforeState, afterState) {
     this.ds = ds;
-    this.start = start;
-    this.len = len;
+    this.beforeState = beforeState;
+    this.afterState = afterState;
     /**
      * Use this to save and restore metadata like selection range
      */
@@ -2170,54 +2173,64 @@ const popStackItem = (undoManager, stack, eventType) => {
   transact(doc, transaction => {
     while (stack.length > 0 && result === null) {
       const store = doc.store;
-      const clientID = doc.clientID;
       const stackItem = /** @type {StackItem} */ (stack.pop());
-      const stackStartClock = stackItem.start;
-      const stackEndClock = stackItem.start + stackItem.len;
+      /**
+       * @type {Set<Item>}
+       */
       const itemsToRedo = new Set();
-      // @todo iterateStructs should not need the structs parameter
-      const structs = /** @type {Array<GC|Item>} */ (store.clients.get(clientID));
+      /**
+       * @type {Array<Item>}
+       */
+      const itemsToDelete = [];
       let performedChange = false;
-      if (stackStartClock !== stackEndClock) {
-        // make sure structs don't overlap with the range of created operations [stackItem.start, stackItem.start + stackItem.end)
-        getItemCleanStart(transaction, createID(clientID, stackStartClock));
-        if (stackEndClock < getState(doc.store, clientID)) {
-          getItemCleanStart(transaction, createID(clientID, stackEndClock));
+      stackItem.afterState.forEach((endClock, client) => {
+        const startClock = stackItem.beforeState.get(client) || 0;
+        const len = endClock - startClock;
+        // @todo iterateStructs should not need the structs parameter
+        const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
+        if (startClock !== endClock) {
+          // make sure structs don't overlap with the range of created operations [stackItem.start, stackItem.start + stackItem.end)
+          // this must be executed before deleted structs are iterated.
+          getItemCleanStart(transaction, createID(client, startClock));
+          if (endClock < getState(doc.store, client)) {
+            getItemCleanStart(transaction, createID(client, endClock));
+          }
+          iterateStructs(transaction, structs, startClock, len, struct => {
+            if (struct instanceof Item) {
+              if (struct.redone !== null) {
+                let { item, diff } = followRedone(store, struct.id);
+                if (diff > 0) {
+                  item = getItemCleanStart(transaction, createID(item.id.client, item.id.clock + diff));
+                }
+                if (item.length > len) {
+                  getItemCleanStart(transaction, createID(item.id.client, endClock));
+                }
+                struct = item;
+              }
+              if (!struct.deleted && scope.some(type => isParentOf(type, /** @type {Item} */ (struct)))) {
+                itemsToDelete.push(struct);
+              }
+            }
+          });
         }
-      }
+      });
       iterateDeletedStructs(transaction, stackItem.ds, struct => {
+        const id = struct.id;
+        const clock = id.clock;
+        const client = id.client;
+        const startClock = stackItem.beforeState.get(client) || 0;
+        const endClock = stackItem.afterState.get(client) || 0;
         if (
           struct instanceof Item &&
           scope.some(type => isParentOf(type, struct)) &&
           // Never redo structs in [stackItem.start, stackItem.start + stackItem.end) because they were created and deleted in the same capture interval.
-          !(struct.id.client === clientID && struct.id.clock >= stackStartClock && struct.id.clock < stackEndClock)
+          !(clock >= startClock && clock < endClock)
         ) {
           itemsToRedo.add(struct);
         }
       });
       itemsToRedo.forEach(struct => {
         performedChange = redoItem(transaction, struct, itemsToRedo) !== null || performedChange;
-      });
-      /**
-       * @type {Array<Item>}
-       */
-      const itemsToDelete = [];
-      iterateStructs(transaction, structs, stackStartClock, stackItem.len, struct => {
-        if (struct instanceof Item) {
-          if (struct.redone !== null) {
-            let { item, diff } = followRedone(store, struct.id);
-            if (diff > 0) {
-              item = getItemCleanStart(transaction, createID(item.id.client, item.id.clock + diff));
-            }
-            if (item.length > stackItem.len) {
-              getItemCleanStart(transaction, createID(item.id.client, stackEndClock));
-            }
-            struct = item;
-          }
-          if (!struct.deleted && scope.some(type => isParentOf(type, /** @type {Item} */ (struct)))) {
-            itemsToDelete.push(struct);
-          }
-        }
       });
       // We want to delete in reverse order so that children are deleted before
       // parents, so we have more information available when items are filtered.
@@ -2301,17 +2314,17 @@ class UndoManager extends observable_js.Observable {
         // neither undoing nor redoing: delete redoStack
         this.redoStack = [];
       }
-      const beforeState = transaction.beforeState.get(this.doc.clientID) || 0;
-      const afterState = transaction.afterState.get(this.doc.clientID) || 0;
+      const beforeState = transaction.beforeState;
+      const afterState = transaction.afterState;
       const now = time.getUnixTime();
       if (now - this.lastChange < captureTimeout && stack.length > 0 && !undoing && !redoing) {
         // append change to last stack op
         const lastOp = stack[stack.length - 1];
         lastOp.ds = mergeDeleteSets([lastOp.ds, transaction.deleteSet]);
-        lastOp.len = afterState - lastOp.start;
+        lastOp.afterState = afterState;
       } else {
         // create a new stack op
-        stack.push(new StackItem(transaction.deleteSet, beforeState, afterState - beforeState));
+        stack.push(new StackItem(transaction.deleteSet, beforeState, afterState));
       }
       if (!undoing && !redoing) {
         this.lastChange = now;
@@ -2606,7 +2619,7 @@ const getPathTo = (parent, child) => {
     } else {
       // parent is array-ish
       let i = 0;
-      let c = child._item.parent._start;
+      let c = /** @type {AbstractType<any>} */ (child._item.parent)._start;
       while (c !== child._item && c !== null) {
         if (!c.deleted) {
           i++;
@@ -2615,9 +2628,25 @@ const getPathTo = (parent, child) => {
       }
       path.unshift(i);
     }
-    child = child._item.parent;
+    child = /** @type {AbstractType<any>} */ (child._item.parent);
   }
   return path
+};
+
+/**
+ * Accumulate all (list) children of a type and return them as an Array.
+ *
+ * @param {AbstractType<any>} t
+ * @return {Array<Item>}
+ */
+const getTypeChildren = t => {
+  let s = t._start;
+  const arr = [];
+  while (s) {
+    arr.push(s);
+    s = s.right;
+  }
+  return arr
 };
 
 /**
@@ -2638,7 +2667,7 @@ const callTypeObservers = (type, transaction, event) => {
     if (type._item === null) {
       break
     }
-    type = type._item.parent;
+    type = /** @type {AbstractType<any>} */ (type._item.parent);
   }
   callEventHandlerListeners(changedType._eH, event, transaction);
 };
@@ -2935,6 +2964,9 @@ const typeListGet = (type, index) => {
  */
 const typeListInsertGenericsAfter = (transaction, parent, referenceItem, content) => {
   let left = referenceItem;
+  const doc = transaction.doc;
+  const ownClientId = doc.clientID;
+  const store = doc.store;
   const right = referenceItem === null ? parent._start : referenceItem.right;
   /**
    * @type {Array<Object|Array<any>|number>}
@@ -2942,8 +2974,8 @@ const typeListInsertGenericsAfter = (transaction, parent, referenceItem, content
   let jsonContent = [];
   const packJsonContent = () => {
     if (jsonContent.length > 0) {
-      left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentJSON(jsonContent));
-      left.integrate(transaction);
+      left = new Item(createID(ownClientId, getState(store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentAny(jsonContent));
+      left.integrate(transaction, 0);
       jsonContent = [];
     }
   };
@@ -2961,13 +2993,13 @@ const typeListInsertGenericsAfter = (transaction, parent, referenceItem, content
         switch (c.constructor) {
           case Uint8Array:
           case ArrayBuffer:
-            left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentBinary(new Uint8Array(/** @type {Uint8Array} */ (c))));
-            left.integrate(transaction);
+            left = new Item(createID(ownClientId, getState(store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentBinary(new Uint8Array(/** @type {Uint8Array} */ (c))));
+            left.integrate(transaction, 0);
             break
           default:
             if (c instanceof AbstractType) {
-              left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentType(c));
-              left.integrate(transaction);
+              left = new Item(createID(ownClientId, getState(store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentType(c));
+              left.integrate(transaction, 0);
             } else {
               throw new Error('Unexpected content type in insert operation')
             }
@@ -3069,6 +3101,8 @@ const typeMapDelete = (transaction, parent, key) => {
  */
 const typeMapSet = (transaction, parent, key, value) => {
   const left = parent._map.get(key) || null;
+  const doc = transaction.doc;
+  const ownClientId = doc.clientID;
   let content;
   if (value == null) {
     content = new ContentJSON([value]);
@@ -3092,7 +3126,7 @@ const typeMapSet = (transaction, parent, key, value) => {
         }
     }
   }
-  new Item(nextID(transaction), left, left === null ? null : left.lastId, null, null, parent, key, content).integrate(transaction);
+  new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, null, null, parent, key, content).integrate(transaction, 0);
 };
 
 /**
@@ -3190,7 +3224,7 @@ class YArrayEvent extends YEvent {
  * A shared Array implementation.
  * @template T
  * @extends AbstractType<YArrayEvent<T>>
- * @implements {IterableIterator<T>}
+ * @implements {Iterable<T>}
  */
 class YArray extends AbstractType {
   constructor () {
@@ -3269,6 +3303,15 @@ class YArray extends AbstractType {
    */
   push (content) {
     this.insert(this.length, content);
+  }
+
+  /**
+   * Preppends content to this YArray.
+   *
+   * @param {Array<T>} content Array of content to preppend.
+   */
+  unshift (content) {
+    this.insert(0, content);
   }
 
   /**
@@ -3381,16 +3424,26 @@ class YMapEvent extends YEvent {
  * A shared Map implementation.
  *
  * @extends AbstractType<YMapEvent<T>>
- * @implements {IterableIterator}
+ * @implements {Iterable<T>}
  */
 class YMap extends AbstractType {
-  constructor () {
+  /**
+   *
+   * @param {Iterable<readonly [string, any]>=} entries - an optional iterable to initialize the YMap
+   */
+  constructor (entries) {
     super();
     /**
      * @type {Map<string,any>?}
      * @private
      */
-    this._prelimContent = new Map();
+    this._prelimContent = null;
+
+    if (entries === undefined) {
+      this._prelimContent = new Map();
+    } else {
+      this._prelimContent = new Map(entries);
+    }
   }
 
   /**
@@ -3445,6 +3498,15 @@ class YMap extends AbstractType {
   }
 
   /**
+   * Returns the size of the YMap (count of key/value pairs)
+   *
+   * @return {number}
+   */
+  get size () {
+    return [...createMapIterator(this._map)].length
+  }
+
+  /**
    * Returns the keys for each element in the YMap Type.
    *
    * @return {IterableIterator<string>}
@@ -3472,7 +3534,7 @@ class YMap extends AbstractType {
   }
 
   /**
-   * Executes a provided function on once on overy key-value pair.
+   * Executes a provided function on once on every key-value pair.
    *
    * @param {function(T,string,YMap<T>):void} f A function to execute on every element of this YArray.
    */
@@ -3594,18 +3656,6 @@ class ItemTextListPosition extends ItemListPosition {
   }
 }
 
-class ItemInsertionResult extends ItemListPosition {
-  /**
-   * @param {Item|null} left
-   * @param {Item|null} right
-   * @param {Map<string,any>} negatedAttributes
-   */
-  constructor (left, right, negatedAttributes) {
-    super(left, right);
-    this.negatedAttributes = negatedAttributes;
-  }
-}
-
 /**
  * @param {Transaction} transaction
  * @param {Map<string,any>} currentAttributes
@@ -3662,15 +3712,14 @@ const findPosition = (transaction, parent, index) => {
  *
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} negatedAttributes
- * @return {ItemListPosition}
  *
  * @private
  * @function
  */
-const insertNegatedAttributes = (transaction, parent, left, right, negatedAttributes) => {
+const insertNegatedAttributes = (transaction, parent, currPos, negatedAttributes) => {
+  let { left, right } = currPos;
   // check if we really need to remove attributes
   while (
     right !== null && (
@@ -3686,11 +3735,14 @@ const insertNegatedAttributes = (transaction, parent, left, right, negatedAttrib
     left = right;
     right = right.right;
   }
+  const doc = transaction.doc;
+  const ownClientId = doc.clientID;
   for (const [key, val] of negatedAttributes) {
-    left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentFormat(key, val));
-    left.integrate(transaction);
+    left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
+    left.integrate(transaction, 0);
   }
-  return { left, right }
+  currPos.left = left;
+  currPos.right = right;
 };
 
 /**
@@ -3710,17 +3762,16 @@ const updateCurrentAttributes = (currentAttributes, format) => {
 };
 
 /**
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {Object<string,any>} attributes
- * @return {ItemListPosition}
  *
  * @private
  * @function
  */
-const minimizeAttributeChanges = (left, right, currentAttributes, attributes) => {
+const minimizeAttributeChanges = (currPos, currentAttributes, attributes) => {
   // go right while attributes[right.key] === right.value (or right is deleted)
+  let { left, right } = currPos;
   while (true) {
     if (right === null) {
       break
@@ -3733,22 +3784,24 @@ const minimizeAttributeChanges = (left, right, currentAttributes, attributes) =>
     left = right;
     right = right.right;
   }
-  return new ItemListPosition(left, right)
+  currPos.left = left;
+  currPos.right = right;
 };
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {Object<string,any>} attributes
- * @return {ItemInsertionResult}
+ * @return {Map<string,any>}
  *
  * @private
  * @function
  **/
-const insertAttributes = (transaction, parent, left, right, currentAttributes, attributes) => {
+const insertAttributes = (transaction, parent, currPos, currentAttributes, attributes) => {
+  const doc = transaction.doc;
+  const ownClientId = doc.clientID;
   const negatedAttributes = new Map();
   // insert format-start items
   for (const key in attributes) {
@@ -3757,62 +3810,60 @@ const insertAttributes = (transaction, parent, left, right, currentAttributes, a
     if (!equalAttrs(currentVal, val)) {
       // save negated attribute (set null if currentVal undefined)
       negatedAttributes.set(key, currentVal);
-      left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentFormat(key, val));
-      left.integrate(transaction);
+      const { left, right } = currPos;
+      currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
+      currPos.left.integrate(transaction, 0);
     }
   }
-  return new ItemInsertionResult(left, right, negatedAttributes)
+  return negatedAttributes
 };
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {string|object} text
  * @param {Object<string,any>} attributes
- * @return {ItemListPosition}
  *
  * @private
  * @function
  **/
-const insertText = (transaction, parent, left, right, currentAttributes, text, attributes) => {
+const insertText = (transaction, parent, currPos, currentAttributes, text, attributes) => {
   for (const [key] of currentAttributes) {
     if (attributes[key] === undefined) {
       attributes[key] = null;
     }
   }
-  const minPos = minimizeAttributeChanges(left, right, currentAttributes, attributes);
-  const insertPos = insertAttributes(transaction, parent, minPos.left, minPos.right, currentAttributes, attributes);
-  left = insertPos.left;
-  right = insertPos.right;
+  const doc = transaction.doc;
+  const ownClientId = doc.clientID;
+  minimizeAttributeChanges(currPos, currentAttributes, attributes);
+  const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes);
   // insert content
   const content = text.constructor === String ? new ContentString(/** @type {string} */ (text)) : new ContentEmbed(text);
-  left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, content);
-  left.integrate(transaction);
-  return insertNegatedAttributes(transaction, parent, left, insertPos.right, insertPos.negatedAttributes)
+  const { left, right } = currPos;
+  currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, content);
+  currPos.left.integrate(transaction, 0);
+  return insertNegatedAttributes(transaction, parent, currPos, negatedAttributes)
 };
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {number} length
  * @param {Object<string,any>} attributes
- * @return {ItemListPosition}
  *
  * @private
  * @function
  */
-const formatText = (transaction, parent, left, right, currentAttributes, length, attributes) => {
-  const minPos = minimizeAttributeChanges(left, right, currentAttributes, attributes);
-  const insertPos = insertAttributes(transaction, parent, minPos.left, minPos.right, currentAttributes, attributes);
-  const negatedAttributes = insertPos.negatedAttributes;
-  left = insertPos.left;
-  right = insertPos.right;
+const formatText = (transaction, parent, currPos, currentAttributes, length, attributes) => {
+  const doc = transaction.doc;
+  const ownClientId = doc.clientID;
+  minimizeAttributeChanges(currPos, currentAttributes, attributes);
+  const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes);
+  let { left, right } = currPos;
   // iterate until first non-format or null is found
   // delete all formats with attributes[format.key] != null
   while (length > 0 && right !== null) {
@@ -3852,16 +3903,121 @@ const formatText = (transaction, parent, left, right, currentAttributes, length,
     for (; length > 0; length--) {
       newlines += '\n';
     }
-    left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentString(newlines));
-    left.integrate(transaction);
+    left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentString(newlines));
+    left.integrate(transaction, 0);
   }
-  return insertNegatedAttributes(transaction, parent, left, right, negatedAttributes)
+  currPos.left = left;
+  currPos.right = right;
+  insertNegatedAttributes(transaction, parent, currPos, negatedAttributes);
+};
+
+/**
+ * Call this function after string content has been deleted in order to
+ * clean up formatting Items.
+ *
+ * @param {Transaction} transaction
+ * @param {Item} start
+ * @param {Item|null} end exclusive end, automatically iterates to the next Content Item
+ * @param {Map<string,any>} startAttributes
+ * @param {Map<string,any>} endAttributes This attribute is modified!
+ * @return {number} The amount of formatting Items deleted.
+ *
+ * @function
+ */
+const cleanupFormattingGap = (transaction, start, end, startAttributes, endAttributes) => {
+  while (end && end.content.constructor !== ContentString && end.content.constructor !== ContentEmbed) {
+    if (!end.deleted && end.content.constructor === ContentFormat) {
+      updateCurrentAttributes(endAttributes, /** @type {ContentFormat} */ (end.content));
+    }
+    end = end.right;
+  }
+  let cleanups = 0;
+  while (start !== end) {
+    if (!start.deleted) {
+      const content = start.content;
+      switch (content.constructor) {
+        case ContentFormat: {
+          const { key, value } = /** @type {ContentFormat} */ (content);
+          if ((endAttributes.get(key) || null) !== value || (startAttributes.get(key) || null) === value) {
+            // Either this format is overwritten or it is not necessary because the attribute already existed.
+            start.delete(transaction);
+            cleanups++;
+          }
+          break
+        }
+      }
+    }
+    start = /** @type {Item} */ (start.right);
+  }
+  return cleanups
 };
 
 /**
  * @param {Transaction} transaction
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {Item | null} item
+ */
+const cleanupContextlessFormattingGap = (transaction, item) => {
+  // iterate until item.right is null or content
+  while (item && item.right && (item.right.deleted || (item.right.content.constructor !== ContentString && item.right.content.constructor !== ContentEmbed))) {
+    item = item.right;
+  }
+  const attrs = new Set();
+  // iterate back until a content item is found
+  while (item && (item.deleted || (item.content.constructor !== ContentString && item.content.constructor !== ContentEmbed))) {
+    if (!item.deleted && item.content.constructor === ContentFormat) {
+      const key = /** @type {ContentFormat} */ (item.content).key;
+      if (attrs.has(key)) {
+        item.delete(transaction);
+      } else {
+        attrs.add(key);
+      }
+    }
+    item = item.left;
+  }
+};
+
+/**
+ * This function is experimental and subject to change / be removed.
+ *
+ * Ideally, we don't need this function at all. Formatting attributes should be cleaned up
+ * automatically after each change. This function iterates twice over the complete YText type
+ * and removes unnecessary formatting attributes. This is also helpful for testing.
+ *
+ * This function won't be exported anymore as soon as there is confidence that the YText type works as intended.
+ *
+ * @param {YText} type
+ * @return {number} How many formatting attributes have been cleaned up.
+ */
+const cleanupYTextFormatting = type => {
+  let res = 0;
+  transact(/** @type {Doc} */ (type.doc), transaction => {
+    let start = /** @type {Item} */ (type._start);
+    let end = type._start;
+    let startAttributes = map.create();
+    const currentAttributes = map.copy(startAttributes);
+    while (end) {
+      if (end.deleted === false) {
+        switch (end.content.constructor) {
+          case ContentFormat:
+            updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (end.content));
+            break
+          case ContentEmbed:
+          case ContentString:
+            res += cleanupFormattingGap(transaction, start, end, startAttributes, currentAttributes);
+            startAttributes = map.copy(currentAttributes);
+            start = end;
+            break
+        }
+      }
+      end = end.right;
+    }
+  });
+  return res
+};
+
+/**
+ * @param {Transaction} transaction
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {number} length
  * @return {ItemListPosition}
@@ -3869,7 +4025,10 @@ const formatText = (transaction, parent, left, right, currentAttributes, length,
  * @private
  * @function
  */
-const deleteText = (transaction, left, right, currentAttributes, length) => {
+const deleteText = (transaction, currPos, currentAttributes, length) => {
+  const startAttrs = map.copy(currentAttributes);
+  const start = currPos.right;
+  let { left, right } = currPos;
   while (length > 0 && right !== null) {
     if (right.deleted === false) {
       switch (right.content.constructor) {
@@ -3889,7 +4048,12 @@ const deleteText = (transaction, left, right, currentAttributes, length) => {
     left = right;
     right = right.right;
   }
-  return { left, right }
+  if (start) {
+    cleanupFormattingGap(transaction, start, right, startAttrs, map.copy(currentAttributes));
+  }
+  currPos.left = left;
+  currPos.right = right;
+  return currPos
 };
 
 /**
@@ -4187,7 +4351,48 @@ class YText extends AbstractType {
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
    */
   _callObserver (transaction, parentSubs) {
-    callTypeObservers(this, transaction, new YTextEvent(this, transaction));
+    const event = new YTextEvent(this, transaction);
+    const doc = transaction.doc;
+    // If a remote change happened, we try to cleanup potential formatting duplicates.
+    if (!transaction.local) {
+      // check if another formatting item was inserted
+      let foundFormattingItem = false;
+      for (const [client, afterClock] of transaction.afterState) {
+        const clock = transaction.beforeState.get(client) || 0;
+        if (afterClock === clock) {
+          continue
+        }
+        iterateStructs(transaction, /** @type {Array<Item|GC>} */ (doc.store.clients.get(client)), clock, afterClock, item => {
+          // @ts-ignore
+          if (!item.deleted && item.content.constructor === ContentFormat) {
+            foundFormattingItem = true;
+          }
+        });
+        if (foundFormattingItem) {
+          break
+        }
+      }
+      transact(doc, t => {
+        if (foundFormattingItem) {
+          // If a formatting item was inserted, we simply clean the whole type.
+          // We need to compute currentAttributes for the current position anyway.
+          cleanupYTextFormatting(this);
+        } else {
+          // If no formatting attribute was inserted, we can make due with contextless
+          // formatting cleanups.
+          // Contextless: it is not necessary to compute currentAttributes for the affected position.
+          iterateDeletedStructs(t, transaction.deleteSet, item => {
+            if (item instanceof GC) {
+              return
+            }
+            if (item.parent === this) {
+              cleanupContextlessFormattingGap(t, item);
+            }
+          });
+        }
+      });
+    }
+    callTypeObservers(this, transaction, event);
   }
 
   /**
@@ -4224,16 +4429,19 @@ class YText extends AbstractType {
    * Apply a {@link Delta} on this shared YText type.
    *
    * @param {any} delta The changes to apply on this element.
+   * @param {object}  [opts]
+   * @param {boolean} [opts.sanitize] Sanitize input delta. Removes ending newlines if set to true.
+   *
    *
    * @public
    */
-  applyDelta (delta) {
+  applyDelta (delta, { sanitize = true } = {}) {
     if (this.doc !== null) {
       transact(this.doc, transaction => {
         /**
          * @type {ItemListPosition}
          */
-        let pos = new ItemListPosition(null, this._start);
+        const currPos = new ItemListPosition(null, this._start);
         const currentAttributes = new Map();
         for (let i = 0; i < delta.length; i++) {
           const op = delta[i];
@@ -4243,14 +4451,14 @@ class YText extends AbstractType {
             // there is a newline at the end of the content.
             // If we omit this step, clients will see a different number of
             // paragraphs, but nothing bad will happen.
-            const ins = (typeof op.insert === 'string' && i === delta.length - 1 && pos.right === null && op.insert.slice(-1) === '\n') ? op.insert.slice(0, -1) : op.insert;
+            const ins = (!sanitize && typeof op.insert === 'string' && i === delta.length - 1 && currPos.right === null && op.insert.slice(-1) === '\n') ? op.insert.slice(0, -1) : op.insert;
             if (typeof ins !== 'string' || ins.length > 0) {
-              pos = insertText(transaction, this, pos.left, pos.right, currentAttributes, ins, op.attributes || {});
+              insertText(transaction, this, currPos, currentAttributes, ins, op.attributes || {});
             }
           } else if (op.retain !== undefined) {
-            pos = formatText(transaction, this, pos.left, pos.right, currentAttributes, op.retain, op.attributes || {});
+            formatText(transaction, this, currPos, currentAttributes, op.retain, op.attributes || {});
           } else if (op.delete !== undefined) {
-            pos = deleteText(transaction, pos.left, pos.right, currentAttributes, op.delete);
+            deleteText(transaction, currPos, currentAttributes, op.delete);
           }
         }
       });
@@ -4388,7 +4596,7 @@ class YText extends AbstractType {
           // @ts-ignore
           currentAttributes.forEach((v, k) => { attributes[k] = v; });
         }
-        insertText(transaction, this, left, right, currentAttributes, text, attributes);
+        insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, text, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.insert(index, text, attributes));
@@ -4413,7 +4621,7 @@ class YText extends AbstractType {
     if (y !== null) {
       transact(y, transaction => {
         const { left, right, currentAttributes } = findPosition(transaction, this, index);
-        insertText(transaction, this, left, right, currentAttributes, embed, attributes);
+        insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, embed, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.insertEmbed(index, embed, attributes));
@@ -4436,7 +4644,7 @@ class YText extends AbstractType {
     if (y !== null) {
       transact(y, transaction => {
         const { left, right, currentAttributes } = findPosition(transaction, this, index);
-        deleteText(transaction, left, right, currentAttributes, length);
+        deleteText(transaction, new ItemListPosition(left, right), currentAttributes, length);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.delete(index, length));
@@ -4454,6 +4662,9 @@ class YText extends AbstractType {
    * @public
    */
   format (index, length, attributes) {
+    if (length === 0) {
+      return
+    }
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
@@ -4461,7 +4672,7 @@ class YText extends AbstractType {
         if (right === null) {
           return
         }
-        formatText(transaction, this, left, right, currentAttributes, length, attributes);
+        formatText(transaction, this, new ItemListPosition(left, right), currentAttributes, length, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.format(index, length, attributes));
@@ -4517,7 +4728,7 @@ const readYText = decoder => new YText();
  * Can be created with {@link YXmlFragment#createTreeWalker}
  *
  * @public
- * @implements {IterableIterator}
+ * @implements {Iterable<YXmlElement|YXmlText|YXmlElement|YXmlHook>}
  */
 class YXmlTreeWalker {
   /**
@@ -4550,10 +4761,10 @@ class YXmlTreeWalker {
      * @type {Item|null}
      */
     let n = this._currentNode;
-    let type = /** @type {ContentType} */ (n.content).type;
+    let type = /** @type {any} */ (n.content).type;
     if (n !== null && (!this._firstCall || n.deleted || !this._filter(type))) { // if first call, we check if we can use the first item
       do {
-        type = /** @type {ContentType} */ (n.content).type;
+        type = /** @type {any} */ (n.content).type;
         if (!n.deleted && (type.constructor === YXmlElement || type.constructor === YXmlFragment) && type._start !== null) {
           // walk down in the tree
           n = type._start;
@@ -4566,7 +4777,7 @@ class YXmlTreeWalker {
             } else if (n.parent === this._root) {
               n = null;
             } else {
-              n = n.parent._item;
+              n = /** @type {AbstractType<any>} */ (n.parent)._item;
             }
           }
         }
@@ -5202,14 +5413,15 @@ class AbstractStruct {
    * @param {number} length
    */
   constructor (id, length) {
-    /**
-     * The uniqe identifier of this struct.
-     * @type {ID}
-     * @readonly
-     */
     this.id = id;
     this.length = length;
-    this.deleted = false;
+  }
+
+  /**
+   * @type {boolean}
+   */
+  get deleted () {
+    throw error.methodUnimplemented()
   }
 
   /**
@@ -5234,43 +5446,9 @@ class AbstractStruct {
 
   /**
    * @param {Transaction} transaction
-   */
-  integrate (transaction) {
-    throw error.methodUnimplemented()
-  }
-}
-
-class AbstractStructRef {
-  /**
-   * @param {ID} id
-   */
-  constructor (id) {
-    /**
-     * @type {Array<ID>}
-     */
-    this._missing = [];
-    /**
-     * The uniqe identifier of this type.
-     * @type {ID}
-     */
-    this.id = id;
-  }
-
-  /**
-   * @param {Transaction} transaction
-   * @return {Array<ID|null>}
-   */
-  getMissing (transaction) {
-    return this._missing
-  }
-
-  /**
-   * @param {Transaction} transaction
-   * @param {StructStore} store
    * @param {number} offset
-   * @return {AbstractStruct}
    */
-  toStruct (transaction, store, offset) {
+  integrate (transaction, offset) {
     throw error.methodUnimplemented()
   }
 }
@@ -5281,13 +5459,8 @@ const structGCRefNumber = 0;
  * @private
  */
 class GC extends AbstractStruct {
-  /**
-   * @param {ID} id
-   * @param {number} length
-   */
-  constructor (id, length) {
-    super(id, length);
-    this.deleted = true;
+  get deleted () {
+    return true
   }
 
   delete () {}
@@ -5303,8 +5476,13 @@ class GC extends AbstractStruct {
 
   /**
    * @param {Transaction} transaction
+   * @param {number} offset
    */
-  integrate (transaction) {
+  integrate (transaction, offset) {
+    if (offset > 0) {
+      this.id.clock += offset;
+      this.length -= offset;
+    }
     addStruct(transaction.doc.store, this);
   }
 
@@ -5316,41 +5494,14 @@ class GC extends AbstractStruct {
     encoding.writeUint8(encoder, structGCRefNumber);
     encoding.writeVarUint(encoder, this.length - offset);
   }
-}
-
-/**
- * @private
- */
-class GCRef extends AbstractStructRef {
-  /**
-   * @param {decoding.Decoder} decoder
-   * @param {ID} id
-   * @param {number} info
-   */
-  constructor (decoder, id, info) {
-    super(id);
-    /**
-     * @type {number}
-     */
-    this.length = decoding.readVarUint(decoder);
-  }
 
   /**
    * @param {Transaction} transaction
    * @param {StructStore} store
-   * @param {number} offset
-   * @return {GC}
+   * @return {null | number}
    */
-  toStruct (transaction, store, offset) {
-    if (offset > 0) {
-      // @ts-ignore
-      this.id = createID(this.id.client, this.id.clock + offset);
-      this.length -= offset;
-    }
-    return new GC(
-      this.id,
-      this.length
-    )
+  getMissing (transaction, store) {
+    return null
   }
 }
 
@@ -5502,7 +5653,7 @@ class ContentDeleted {
    */
   integrate (transaction, item) {
     addToDeleteSet(transaction.deleteSet, item.id, this.len);
-    item.deleted = true;
+    item.markDeleted();
   }
 
   /**
@@ -6141,7 +6292,7 @@ class ContentType {
         // We try to merge all deleted items after each transaction,
         // but we have no knowledge about that this needs to be merged
         // since it is not in transaction.ds. Hence we add it to transaction._mergeStructs
-        transaction._mergeStructs.add(item.id);
+        transaction._mergeStructs.push(item);
       }
       item = item.right;
     }
@@ -6150,7 +6301,7 @@ class ContentType {
         item.delete(transaction);
       } else {
         // same as above
-        transaction._mergeStructs.add(item.id);
+        transaction._mergeStructs.push(item);
       }
     });
     transaction.changed.delete(this.type);
@@ -6238,7 +6389,7 @@ const followRedone = (store, id) => {
 const keepItem = (item, keep) => {
   while (item !== null && item.keep !== keep) {
     item.keep = keep;
-    item = item.parent._item;
+    item = /** @type {AbstractType<any>} */ (item.parent)._item;
   }
 };
 
@@ -6253,12 +6404,12 @@ const keepItem = (item, keep) => {
  * @private
  */
 const splitItem = (transaction, leftItem, diff) => {
-  const id = leftItem.id;
   // create rightItem
+  const { client, clock } = leftItem.id;
   const rightItem = new Item(
-    createID(id.client, id.clock + diff),
+    createID(client, clock + diff),
     leftItem,
-    createID(id.client, id.clock + diff - 1),
+    createID(client, clock + diff - 1),
     leftItem.right,
     leftItem.rightOrigin,
     leftItem.parent,
@@ -6266,7 +6417,7 @@ const splitItem = (transaction, leftItem, diff) => {
     leftItem.content.splice(diff)
   );
   if (leftItem.deleted) {
-    rightItem.deleted = true;
+    rightItem.markDeleted();
   }
   if (leftItem.keep) {
     rightItem.keep = true;
@@ -6281,10 +6432,10 @@ const splitItem = (transaction, leftItem, diff) => {
     rightItem.right.left = rightItem;
   }
   // right is more specific.
-  transaction._mergeStructs.add(rightItem.id);
+  transaction._mergeStructs.push(rightItem);
   // update parent._map
   if (rightItem.parentSub !== null && rightItem.right === null) {
-    rightItem.parent._map.set(rightItem.parentSub, rightItem);
+    /** @type {AbstractType<any>} */ (rightItem.parent)._map.set(rightItem.parentSub, rightItem);
   }
   leftItem.length = diff;
   return rightItem
@@ -6302,10 +6453,14 @@ const splitItem = (transaction, leftItem, diff) => {
  * @private
  */
 const redoItem = (transaction, item, redoitems) => {
-  if (item.redone !== null) {
-    return getItemCleanStart(transaction, item.redone)
+  const doc = transaction.doc;
+  const store = doc.store;
+  const ownClientID = doc.clientID;
+  const redone = item.redone;
+  if (redone !== null) {
+    return getItemCleanStart(transaction, redone)
   }
-  let parentItem = item.parent._item;
+  let parentItem = /** @type {AbstractType<any>} */ (item.parent)._item;
   /**
    * @type {Item|null}
    */
@@ -6323,14 +6478,14 @@ const redoItem = (transaction, item, redoitems) => {
     left = item;
     while (left.right !== null) {
       left = left.right;
-      if (left.id.client !== transaction.doc.clientID) {
+      if (left.id.client !== ownClientID) {
         // It is not possible to redo this item because it conflicts with a
         // change from another client
         return null
       }
     }
     if (left.right !== null) {
-      left = /** @type {Item} */ (item.parent._map.get(item.parentSub));
+      left = /** @type {Item} */ (/** @type {AbstractType<any>} */ (item.parent)._map.get(item.parentSub));
     }
     right = null;
   }
@@ -6352,10 +6507,10 @@ const redoItem = (transaction, item, redoitems) => {
        */
       let leftTrace = left;
       // trace redone until parent matches
-      while (leftTrace !== null && leftTrace.parent._item !== parentItem) {
+      while (leftTrace !== null && /** @type {AbstractType<any>} */ (leftTrace.parent)._item !== parentItem) {
         leftTrace = leftTrace.redone === null ? null : getItemCleanStart(transaction, leftTrace.redone);
       }
-      if (leftTrace !== null && leftTrace.parent._item === parentItem) {
+      if (leftTrace !== null && /** @type {AbstractType<any>} */ (leftTrace.parent)._item === parentItem) {
         left = leftTrace;
         break
       }
@@ -6367,27 +6522,29 @@ const redoItem = (transaction, item, redoitems) => {
        */
       let rightTrace = right;
       // trace redone until parent matches
-      while (rightTrace !== null && rightTrace.parent._item !== parentItem) {
+      while (rightTrace !== null && /** @type {AbstractType<any>} */ (rightTrace.parent)._item !== parentItem) {
         rightTrace = rightTrace.redone === null ? null : getItemCleanStart(transaction, rightTrace.redone);
       }
-      if (rightTrace !== null && rightTrace.parent._item === parentItem) {
+      if (rightTrace !== null && /** @type {AbstractType<any>} */ (rightTrace.parent)._item === parentItem) {
         right = rightTrace;
         break
       }
       right = right.right;
     }
   }
+  const nextClock = getState(store, ownClientID);
+  const nextId = createID(ownClientID, nextClock);
   const redoneItem = new Item(
-    nextID(transaction),
-    left, left === null ? null : left.lastId,
-    right, right === null ? null : right.id,
+    nextId,
+    left, left && left.lastId,
+    right, right && right.id,
     parentItem === null ? item.parent : /** @type {ContentType} */ (parentItem.content).type,
     item.parentSub,
     item.content.copy()
   );
-  item.redone = redoneItem.id;
+  item.redone = nextId;
   keepItem(redoneItem, true);
-  redoneItem.integrate(transaction);
+  redoneItem.integrate(transaction, 0);
   return redoneItem
 };
 
@@ -6401,7 +6558,7 @@ class Item extends AbstractStruct {
    * @param {ID | null} origin
    * @param {Item | null} right
    * @param {ID | null} rightOrigin
-   * @param {AbstractType<any>} parent
+   * @param {AbstractType<any>|ID|null} parent Is a type if integrated, is null if it is possible to copy parent from left or right, is ID before integration to search for it.
    * @param {string | null} parentSub
    * @param {AbstractContent} content
    */
@@ -6410,7 +6567,6 @@ class Item extends AbstractStruct {
     /**
      * The item that was originally to the left of this item.
      * @type {ID | null}
-     * @readonly
      */
     this.origin = origin;
     /**
@@ -6425,14 +6581,11 @@ class Item extends AbstractStruct {
     this.right = right;
     /**
      * The item that was originally to the right of this item.
-     * @readonly
      * @type {ID | null}
      */
     this.rightOrigin = rightOrigin;
     /**
-     * The parent type.
-     * @type {AbstractType<any>}
-     * @readonly
+     * @type {AbstractType<any>|ID|null}
      */
     this.parent = parent;
     /**
@@ -6441,14 +6594,8 @@ class Item extends AbstractStruct {
      * to insert this item. If `parentSub = null` type._start is the list in
      * which to insert to. Otherwise it is `parent._map`.
      * @type {String | null}
-     * @readonly
      */
     this.parentSub = parentSub;
-    /**
-     * Whether this item was deleted or not.
-     * @type {Boolean}
-     */
-    this.deleted = false;
     /**
      * If this type's effect is reundone this type refers to the type that undid
      * this operation.
@@ -6459,109 +6606,213 @@ class Item extends AbstractStruct {
      * @type {AbstractContent}
      */
     this.content = content;
-    this.length = content.getLength();
-    this.countable = content.isCountable();
-    /**
-     * If true, do not garbage collect this Item.
-     */
-    this.keep = false;
+    this.info = this.content.isCountable() ? binary.BIT2 : 0;
+  }
+
+  /**
+   * If true, do not garbage collect this Item.
+   */
+  get keep () {
+    return (this.info & binary.BIT1) > 0
+  }
+
+  set keep (doKeep) {
+    if (this.keep !== doKeep) {
+      this.info ^= binary.BIT1;
+    }
+  }
+
+  get countable () {
+    return (this.info & binary.BIT2) > 0
+  }
+
+  /**
+   * Whether this item was deleted or not.
+   * @type {Boolean}
+   */
+  get deleted () {
+    return (this.info & binary.BIT3) > 0
+  }
+
+  set deleted (doDelete) {
+    if (this.deleted !== doDelete) {
+      this.info ^= binary.BIT3;
+    }
+  }
+
+  markDeleted () {
+    this.info |= binary.BIT3;
+  }
+
+  /**
+   * Return the creator clientID of the missing op or define missing items and return null.
+   *
+   * @param {Transaction} transaction
+   * @param {StructStore} store
+   * @return {null | number}
+   */
+  getMissing (transaction, store) {
+    if (this.origin && this.origin.client !== this.id.client && this.origin.clock >= getState(store, this.origin.client)) {
+      return this.origin.client
+    }
+    if (this.rightOrigin && this.rightOrigin.client !== this.id.client && this.rightOrigin.clock >= getState(store, this.rightOrigin.client)) {
+      return this.rightOrigin.client
+    }
+    if (this.parent && this.parent.constructor === ID && this.id.client !== this.parent.client && this.parent.clock >= getState(store, this.parent.client)) {
+      return this.parent.client
+    }
+
+    // We have all missing ids, now find the items
+
+    if (this.origin) {
+      this.left = getItemCleanEnd(transaction, store, this.origin);
+      this.origin = this.left.lastId;
+    }
+    if (this.rightOrigin) {
+      this.right = getItemCleanStart(transaction, this.rightOrigin);
+      this.rightOrigin = this.right.id;
+    }
+    if ((this.left && this.left.constructor === GC) || (this.right && this.right.constructor === GC)) {
+      this.parent = null;
+    }
+    // only set parent if this shouldn't be garbage collected
+    if (!this.parent) {
+      if (this.left && this.left.constructor === Item) {
+        this.parent = this.left.parent;
+        this.parentSub = this.left.parentSub;
+      }
+      if (this.right && this.right.constructor === Item) {
+        this.parent = this.right.parent;
+        this.parentSub = this.right.parentSub;
+      }
+    } else if (this.parent.constructor === ID) {
+      const parentItem = getItem(store, this.parent);
+      if (parentItem.constructor === GC) {
+        this.parent = null;
+      } else {
+        this.parent = /** @type {ContentType} */ (parentItem.content).type;
+      }
+    }
+    return null
   }
 
   /**
    * @param {Transaction} transaction
+   * @param {number} offset
    */
-  integrate (transaction) {
-    const store = transaction.doc.store;
-    const id = this.id;
-    const parent = this.parent;
-    const parentSub = this.parentSub;
-    const length = this.length;
-    /**
-     * @type {Item|null}
-     */
-    let o;
-    // set o to the first conflicting item
-    if (this.left !== null) {
-      o = this.left.right;
-    } else if (parentSub !== null) {
-      o = parent._map.get(parentSub) || null;
-      while (o !== null && o.left !== null) {
-        o = o.left;
-      }
-    } else {
-      o = parent._start;
+  integrate (transaction, offset) {
+    if (offset > 0) {
+      this.id.clock += offset;
+      this.left = getItemCleanEnd(transaction, transaction.doc.store, createID(this.id.client, this.id.clock - 1));
+      this.origin = this.left.lastId;
+      this.content = this.content.splice(offset);
+      this.length -= offset;
     }
-    // TODO: use something like DeleteSet here (a tree implementation would be best)
-    /**
-     * @type {Set<Item>}
-     */
-    const conflictingItems = new Set();
-    /**
-     * @type {Set<Item>}
-     */
-    const itemsBeforeOrigin = new Set();
-    // Let c in conflictingItems, b in itemsBeforeOrigin
-    // ***{origin}bbbb{this}{c,b}{c,b}{o}***
-    // Note that conflictingItems is a subset of itemsBeforeOrigin
-    while (o !== null && o !== this.right) {
-      itemsBeforeOrigin.add(o);
-      conflictingItems.add(o);
-      if (compareIDs(this.origin, o.origin)) {
-        // case 1
-        if (o.id.client < id.client) {
-          this.left = o;
-          conflictingItems.clear();
+
+    if (this.parent) {
+      if ((!this.left && (!this.right || this.right.left !== null)) || (this.left && this.left.right !== this.right)) {
+        /**
+         * @type {Item|null}
+         */
+        let left = this.left;
+
+        /**
+         * @type {Item|null}
+         */
+        let o;
+        // set o to the first conflicting item
+        if (left !== null) {
+          o = left.right;
+        } else if (this.parentSub !== null) {
+          o = /** @type {AbstractType<any>} */ (this.parent)._map.get(this.parentSub) || null;
+          while (o !== null && o.left !== null) {
+            o = o.left;
+          }
+        } else {
+          o = /** @type {AbstractType<any>} */ (this.parent)._start;
         }
-      } else if (o.origin !== null && itemsBeforeOrigin.has(getItem(store, o.origin))) {
-        // case 2
-        if (o.origin === null || !conflictingItems.has(getItem(store, o.origin))) {
-          this.left = o;
-          conflictingItems.clear();
+        // TODO: use something like DeleteSet here (a tree implementation would be best)
+        // @todo use global set definitions
+        /**
+         * @type {Set<Item>}
+         */
+        const conflictingItems = new Set();
+        /**
+         * @type {Set<Item>}
+         */
+        const itemsBeforeOrigin = new Set();
+        // Let c in conflictingItems, b in itemsBeforeOrigin
+        // ***{origin}bbbb{this}{c,b}{c,b}{o}***
+        // Note that conflictingItems is a subset of itemsBeforeOrigin
+        while (o !== null && o !== this.right) {
+          itemsBeforeOrigin.add(o);
+          conflictingItems.add(o);
+          if (compareIDs(this.origin, o.origin)) {
+            // case 1
+            if (o.id.client < this.id.client) {
+              left = o;
+              conflictingItems.clear();
+            } else if (compareIDs(this.rightOrigin, o.rightOrigin)) {
+              // this and o are conflicting and point to the same integration points. The id decides which item comes first.
+              // Since this is to the left of o, we can break here
+              break
+            } // else, o might be integrated before an item that this conflicts with. If so, we will find it in the next iterations
+          } else if (o.origin !== null && itemsBeforeOrigin.has(getItem(transaction.doc.store, o.origin))) { // use getItem instead of getItemCleanEnd because we don't want / need to split items.
+            // case 2
+            if (!conflictingItems.has(getItem(transaction.doc.store, o.origin))) {
+              left = o;
+              conflictingItems.clear();
+            }
+          } else {
+            break
+          }
+          o = o.right;
         }
-      } else {
-        break
+        this.left = left;
       }
-      o = o.right;
-    }
-    // reconnect left/right + update parent map/start if necessary
-    if (this.left !== null) {
-      const right = this.left.right;
-      this.right = right;
-      this.left.right = this;
-    } else {
-      let r;
-      if (parentSub !== null) {
-        r = parent._map.get(parentSub) || null;
-        while (r !== null && r.left !== null) {
-          r = r.left;
-        }
-      } else {
-        r = parent._start;
-        parent._start = this;
-      }
-      this.right = r;
-    }
-    if (this.right !== null) {
-      this.right.left = this;
-    } else if (parentSub !== null) {
-      // set as current parent value if right === null and this is parentSub
-      parent._map.set(parentSub, this);
+      // reconnect left/right + update parent map/start if necessary
       if (this.left !== null) {
-        // this is the current attribute value of parent. delete right
-        this.left.delete(transaction);
+        const right = this.left.right;
+        this.right = right;
+        this.left.right = this;
+      } else {
+        let r;
+        if (this.parentSub !== null) {
+          r = /** @type {AbstractType<any>} */ (this.parent)._map.get(this.parentSub) || null;
+          while (r !== null && r.left !== null) {
+            r = r.left;
+          }
+        } else {
+          r = /** @type {AbstractType<any>} */ (this.parent)._start
+          ;/** @type {AbstractType<any>} */ (this.parent)._start = this;
+        }
+        this.right = r;
       }
-    }
-    // adjust length of parent
-    if (parentSub === null && this.countable && !this.deleted) {
-      parent._length += length;
-    }
-    addStruct(store, this);
-    this.content.integrate(transaction, this);
-    // add parent to transaction.changed
-    addChangedTypeToTransaction(transaction, parent, parentSub);
-    if ((parent._item !== null && parent._item.deleted) || (this.right !== null && parentSub !== null)) {
-      // delete if parent is deleted or if this is not the current attribute value of parent
-      this.delete(transaction);
+      if (this.right !== null) {
+        this.right.left = this;
+      } else if (this.parentSub !== null) {
+        // set as current parent value if right === null and this is parentSub
+        /** @type {AbstractType<any>} */ (this.parent)._map.set(this.parentSub, this);
+        if (this.left !== null) {
+          // this is the current attribute value of parent. delete right
+          this.left.delete(transaction);
+        }
+      }
+      // adjust length of parent
+      if (this.parentSub === null && this.countable && !this.deleted) {
+        /** @type {AbstractType<any>} */ (this.parent)._length += this.length;
+      }
+      addStruct(transaction.doc.store, this);
+      this.content.integrate(transaction, this);
+      // add parent to transaction.changed
+      addChangedTypeToTransaction(transaction, /** @type {AbstractType<any>} */ (this.parent), this.parentSub);
+      if ((/** @type {AbstractType<any>} */ (this.parent)._item !== null && /** @type {AbstractType<any>} */ (this.parent)._item.deleted) || (this.right !== null && this.parentSub !== null)) {
+        // delete if parent is deleted or if this is not the current attribute value of parent
+        this.delete(transaction);
+      }
+    } else {
+      // parent is not defined. Integrate GC struct instead
+      new GC(this.id, this.length).integrate(transaction, 0);
     }
   }
 
@@ -6591,7 +6842,8 @@ class Item extends AbstractStruct {
    * Computes the last content address of this Item.
    */
   get lastId () {
-    return createID(this.id.client, this.id.clock + this.length - 1)
+    // allocating ids is pretty costly because of the amount of ids created, so we try to reuse whenever possible
+    return this.length === 1 ? this.id : createID(this.id.client, this.id.clock + this.length - 1)
   }
 
   /**
@@ -6633,12 +6885,12 @@ class Item extends AbstractStruct {
    */
   delete (transaction) {
     if (!this.deleted) {
-      const parent = this.parent;
+      const parent = /** @type {AbstractType<any>} */ (this.parent);
       // adjust the length of parent
       if (this.countable && this.parentSub === null) {
         parent._length -= this.length;
       }
-      this.deleted = true;
+      this.markDeleted();
       addToDeleteSet(transaction.deleteSet, this.id, this.length);
       map.setIfUndefined(transaction.changed, parent, set.create).add(this.parentSub);
       this.content.delete(transaction);
@@ -6686,8 +6938,9 @@ class Item extends AbstractStruct {
       writeID(encoder, rightOrigin);
     }
     if (origin === null && rightOrigin === null) {
-      const parent = this.parent;
-      if (parent._item === null) {
+      const parent = /** @type {AbstractType<any>} */ (this.parent);
+      const parentItem = parent._item;
+      if (parentItem === null) {
         // parent type on y._map
         // find the correct key
         const ykey = findRootTypeKey(parent);
@@ -6695,7 +6948,7 @@ class Item extends AbstractStruct {
         encoding.writeVarString(encoder, ykey);
       } else {
         encoding.writeVarUint(encoder, 0); // write parent id
-        writeID(encoder, parent._item.id);
+        writeID(encoder, parentItem.id);
       }
       if (parentSub !== null) {
         encoding.writeVarString(encoder, parentSub);
@@ -6729,126 +6982,39 @@ const contentRefs = [
 ];
 
 /**
- * @private
+ * @param {decoding.Decoder} decoder
+ * @param {ID} id
+ * @param {number} info
+ * @param {Doc} doc
  */
-class ItemRef extends AbstractStructRef {
+const readItem = (decoder, id, info, doc) => {
   /**
-   * @param {decoding.Decoder} decoder
-   * @param {ID} id
-   * @param {number} info
+   * The item that was originally to the left of this item.
+   * @type {ID | null}
    */
-  constructor (decoder, id, info) {
-    super(id);
-    /**
-     * The item that was originally to the left of this item.
-     * @type {ID | null}
-     */
-    this.left = (info & binary.BIT8) === binary.BIT8 ? readID(decoder) : null;
-    /**
-     * The item that was originally to the right of this item.
-     * @type {ID | null}
-     */
-    this.right = (info & binary.BIT7) === binary.BIT7 ? readID(decoder) : null;
-    const canCopyParentInfo = (info & (binary.BIT7 | binary.BIT8)) === 0;
-    const hasParentYKey = canCopyParentInfo ? decoding.readVarUint(decoder) === 1 : false;
-    /**
-     * If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
-     * and we read the next string as parentYKey.
-     * It indicates how we store/retrieve parent from `y.share`
-     * @type {string|null}
-     */
-    this.parentYKey = canCopyParentInfo && hasParentYKey ? decoding.readVarString(decoder) : null;
-    /**
-     * The parent type.
-     * @type {ID | null}
-     */
-    this.parent = canCopyParentInfo && !hasParentYKey ? readID(decoder) : null;
-    /**
-     * If the parent refers to this item with some kind of key (e.g. YMap, the
-     * key is specified here. The key is then used to refer to the list in which
-     * to insert this item. If `parentSub = null` type._start is the list in
-     * which to insert to. Otherwise it is `parent._map`.
-     * @type {String | null}
-     */
-    this.parentSub = canCopyParentInfo && (info & binary.BIT6) === binary.BIT6 ? decoding.readVarString(decoder) : null;
-    const missing = this._missing;
-    if (this.left !== null) {
-      missing.push(this.left);
-    }
-    if (this.right !== null) {
-      missing.push(this.right);
-    }
-    if (this.parent !== null) {
-      missing.push(this.parent);
-    }
-    /**
-     * @type {AbstractContent}
-     */
-    this.content = readItemContent(decoder, info);
-    this.length = this.content.getLength();
-  }
-
+  const origin = (info & binary.BIT8) === binary.BIT8 ? readID(decoder) : null;
   /**
-   * @param {Transaction} transaction
-   * @param {StructStore} store
-   * @param {number} offset
-   * @return {Item|GC}
+   * The item that was originally to the right of this item.
+   * @type {ID | null}
    */
-  toStruct (transaction, store, offset) {
-    if (offset > 0) {
-      /**
-       * @type {ID}
-       */
-      const id = this.id;
-      this.id = createID(id.client, id.clock + offset);
-      this.left = createID(this.id.client, this.id.clock - 1);
-      this.content = this.content.splice(offset);
-      this.length -= offset;
-    }
+  const rightOrigin = (info & binary.BIT7) === binary.BIT7 ? readID(decoder) : null;
+  const canCopyParentInfo = (info & (binary.BIT7 | binary.BIT8)) === 0;
+  const hasParentYKey = canCopyParentInfo ? decoding.readVarUint(decoder) === 1 : false;
+  /**
+   * If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
+   * and we read the next string as parentYKey.
+   * It indicates how we store/retrieve parent from `y.share`
+   * @type {string|null}
+   */
+  const parentYKey = canCopyParentInfo && hasParentYKey ? decoding.readVarString(decoder) : null;
 
-    const left = this.left === null ? null : getItemCleanEnd(transaction, store, this.left);
-    const right = this.right === null ? null : getItemCleanStart(transaction, this.right);
-    let parent = null;
-    let parentSub = this.parentSub;
-    if (this.parent !== null) {
-      const parentItem = getItem(store, this.parent);
-      // Edge case: toStruct is called with an offset > 0. In this case left is defined.
-      // Depending in which order structs arrive, left may be GC'd and the parent not
-      // deleted. This is why we check if left is GC'd. Strictly we don't have
-      // to check if right is GC'd, but we will in case we run into future issues
-      if (!parentItem.deleted && (left === null || left.constructor !== GC) && (right === null || right.constructor !== GC)) {
-        parent = /** @type {ContentType} */ (parentItem.content).type;
-      }
-    } else if (this.parentYKey !== null) {
-      parent = transaction.doc.get(this.parentYKey);
-    } else if (left !== null) {
-      if (left.constructor !== GC) {
-        parent = left.parent;
-        parentSub = left.parentSub;
-      }
-    } else if (right !== null) {
-      if (right.constructor !== GC) {
-        parent = right.parent;
-        parentSub = right.parentSub;
-      }
-    } else {
-      throw error.unexpectedCase()
-    }
-
-    return parent === null
-      ? new GC(this.id, this.length)
-      : new Item(
-        this.id,
-        left,
-        this.left,
-        right,
-        this.right,
-        parent,
-        parentSub,
-        this.content
-      )
-  }
-}
+  return new Item(
+    id, null, origin, null, rightOrigin,
+    canCopyParentInfo && !hasParentYKey ? readID(decoder) : (parentYKey !== null ? doc.get(parentYKey) : null), // parent
+    canCopyParentInfo && (info & binary.BIT6) === binary.BIT6 ? decoding.readVarString(decoder) : null, // parentSub
+    /** @type {AbstractContent} */ (readItemContent(decoder, info)) // item content
+  )
+};
 
 exports.AbstractStruct = AbstractStruct;
 exports.AbstractType = AbstractType;
@@ -6898,10 +7064,12 @@ exports.encodeStateVector = encodeStateVector;
 exports.equalSnapshots = equalSnapshots;
 exports.findRootTypeKey = findRootTypeKey;
 exports.getState = getState;
+exports.getTypeChildren = getTypeChildren;
 exports.isDeleted = isDeleted;
 exports.isParentOf = isParentOf;
 exports.iterateDeletedStructs = iterateDeletedStructs;
 exports.readRelativePosition = readRelativePosition;
+exports.readUpdate = readUpdate;
 exports.snapshot = snapshot;
 exports.transact = transact;
 exports.tryGc = tryGc;

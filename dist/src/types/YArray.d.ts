@@ -14,7 +14,7 @@ export class YArrayEvent<T> extends YEvent {
  * A shared Array implementation.
  * @template T
  * @extends AbstractType<YArrayEvent<T>>
- * @implements {IterableIterator<T>}
+ * @implements {Iterable<T>}
  */
 export class YArray<T> extends AbstractType<YArrayEvent<T>> {
     /**
@@ -58,6 +58,12 @@ export class YArray<T> extends AbstractType<YArrayEvent<T>> {
      * @param {Array<T>} content Array of content to append.
      */
     push(content: T[]): void;
+    /**
+     * Preppends content to this YArray.
+     *
+     * @param {Array<T>} content Array of content to preppend.
+     */
+    unshift(content: T[]): void;
     /**
      * Deletes elements starting from an index.
      *

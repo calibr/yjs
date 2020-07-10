@@ -40,7 +40,7 @@ export class YArrayEvent extends YEvent {
  * A shared Array implementation.
  * @template T
  * @extends AbstractType<YArrayEvent<T>>
- * @implements {IterableIterator<T>}
+ * @implements {Iterable<T>}
  */
 export class YArray extends AbstractType {
   constructor () {
@@ -119,6 +119,15 @@ export class YArray extends AbstractType {
    */
   push (content) {
     this.insert(this.length, content)
+  }
+
+  /**
+   * Preppends content to this YArray.
+   *
+   * @param {Array<T>} content Array of content to preppend.
+   */
+  unshift (content) {
+    this.insert(0, content)
   }
 
   /**

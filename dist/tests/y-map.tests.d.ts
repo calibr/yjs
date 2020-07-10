@@ -1,9 +1,11 @@
+export function testMapHavingIterableAsConstructorParamTests(tc: t.TestCase): void;
 export function testBasicMapTests(tc: t.TestCase): void;
 export function testGetAndSetOfMapProperty(tc: t.TestCase): void;
 export function testYmapSetsYmap(tc: t.TestCase): void;
 export function testYmapSetsYarray(tc: t.TestCase): void;
 export function testGetAndSetOfMapPropertySyncs(tc: t.TestCase): void;
 export function testGetAndSetOfMapPropertyWithConflict(tc: t.TestCase): void;
+export function testSizeAndDeleteOfMapProperty(tc: t.TestCase): void;
 export function testGetAndSetAndDeleteOfMapProperty(tc: t.TestCase): void;
 export function testGetAndSetOfMapPropertyWithThreeConflicts(tc: t.TestCase): void;
 export function testGetAndSetAndDeleteOfMapPropertyWithThreeConflicts(tc: t.TestCase): void;

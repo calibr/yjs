@@ -1,3 +1,4 @@
+export const generateNewClientId: typeof random.uint32;
 /**
  * A Yjs instance handles the state of shared data.
  * @extends Observable<string>
@@ -41,17 +42,17 @@ export class Doc extends Observable<string> {
      */
     transact(f: (arg0: Transaction) => void, origin?: any): void;
     /**
-     * Define a shared data type.
+     * Get a shared data type by name. If it does not yet exist, define its type.
      *
      * Multiple calls of `y.get(name, TypeConstructor)` yield the same result
-     * and do not overwrite each other. I.e.
-     * `y.define(name, Y.Array) === y.define(name, Y.Array)`
+     * and do not overwrite each other, i.e.
+     *   `y.get(name, Y.Array) === y.get(name, Y.Array)`
      *
      * After this method is called, the type is also available on `y.share.get(name)`.
      *
      * *Best Practices:*
      * Define all types right after the Yjs instance is created and store them in a separate object.
-     * Also use the typed methods `getText(name)`, `getArray(name)`, ..
+     * Also use the typed methods `getText(name)`, `getArray(name)`, `getMap(name)`, etc.
      *
      * @example
      *   const y = new Y(..)
@@ -97,6 +98,7 @@ export class Doc extends Observable<string> {
      */
     getXmlFragment(name: string): YXmlFragment;
 }
+import * as random from "lib0/random";
 import { Observable } from "lib0/observable";
 import { Item } from "../structs/Item.js";
 import { AbstractType } from "../types/AbstractType.js";

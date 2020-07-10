@@ -2,7 +2,7 @@
 import {
   GC,
   splitItem,
-  GCRef, ItemRef, Transaction, ID, Item // eslint-disable-line
+  AbstractStruct, Transaction, ID, Item // eslint-disable-line
 } from '../internals.js'
 
 import * as math from 'lib0/math.js'
@@ -21,13 +21,13 @@ export class StructStore {
      * We could shift the array of refs instead, but shift is incredible
      * slow in Chrome for arrays with more than 100k elements
      * @see tryResumePendingStructRefs
-     * @type {Map<number,{i:number,refs:Array<GCRef|ItemRef>}>}
+     * @type {Map<number,{i:number,refs:Array<GC|Item>}>}
      */
     this.pendingClientsStructRefs = new Map()
     /**
      * Stack of pending structs waiting for struct dependencies
      * Maximum length of stack is structReaders.size
-     * @type {Array<GCRef|ItemRef>}
+     * @type {Array<GC|Item>}
      */
     this.pendingStack = []
     /**
@@ -114,7 +114,7 @@ export const addStruct = (store, struct) => {
 
 /**
  * Perform a binary search on a sorted array
- * @param {Array<any>} structs
+ * @param {Array<Item|GC>} structs
  * @param {number} clock
  * @return {number}
  *
@@ -124,10 +124,18 @@ export const addStruct = (store, struct) => {
 export const findIndexSS = (structs, clock) => {
   let left = 0
   let right = structs.length - 1
+  let mid = structs[right]
+  let midclock = mid.id.clock
+  if (midclock === clock) {
+    return right
+  }
+  // @todo does it even make sense to pivot the search?
+  // If a good split misses, it might actually increase the time to find the correct item.
+  // Currently, the only advantage is that search with pivoting might find the item on the first try.
+  let midindex = math.floor((clock / (midclock + mid.length - 1)) * right) // pivoting the search
   while (left <= right) {
-    const midindex = math.floor((left + right) / 2)
-    const mid = structs[midindex]
-    const midclock = mid.id.clock
+    mid = structs[midindex]
+    midclock = mid.id.clock
     if (midclock <= clock) {
       if (clock < midclock + mid.length) {
         return midindex
@@ -136,6 +144,7 @@ export const findIndexSS = (structs, clock) => {
     } else {
       right = midindex - 1
     }
+    midindex = math.floor((left + right) / 2)
   }
   // Always check state before looking for a struct in StructStore
   // Therefore the case of not finding a struct is unexpected
@@ -163,16 +172,10 @@ export const find = (store, id) => {
 
 /**
  * Expects that id is actually in store. This function throws or is an infinite loop otherwise.
- *
- * @param {StructStore} store
- * @param {ID} id
- * @return {Item}
- *
  * @private
  * @function
  */
-// @ts-ignore
-export const getItem = (store, id) => find(store, id)
+export const getItem = /** @type {function(StructStore,ID):Item} */ (find)
 
 /**
  * @param {Transaction} transaction

@@ -16,18 +16,17 @@
 
 import {
   findIndexSS,
-  GCRef,
-  ItemRef,
   writeID,
-  createID,
   readID,
   getState,
+  createID,
   getStateVector,
   readAndApplyDeleteSet,
   writeDeleteSet,
   createDeleteSetFromStructStore,
   transact,
-  Doc, Transaction, AbstractStruct, StructStore, ID // eslint-disable-line
+  readItem,
+  Doc, Transaction, GC, Item, StructStore, ID // eslint-disable-line
 } from '../internals.js'
 
 import * as encoding from 'lib0/encoding.js'
@@ -36,7 +35,7 @@ import * as binary from 'lib0/binary.js'
 
 /**
  * @param {encoding.Encoder} encoder
- * @param {Array<AbstractStruct>} structs All structs by `client`
+ * @param {Array<GC|Item>} structs All structs by `client`
  * @param {number} client
  * @param {number} clock write structs starting with `ID(client,clock)`
  *
@@ -50,33 +49,10 @@ const writeStructs = (encoder, structs, client, clock) => {
   writeID(encoder, createID(client, clock))
   const firstStruct = structs[startNewStructs]
   // write first struct with an offset
-  firstStruct.write(encoder, clock - firstStruct.id.clock, 0)
+  firstStruct.write(encoder, clock - firstStruct.id.clock)
   for (let i = startNewStructs + 1; i < structs.length; i++) {
-    structs[i].write(encoder, 0, 0)
+    structs[i].write(encoder, 0)
   }
-}
-
-/**
- * @param {decoding.Decoder} decoder
- * @param {number} numOfStructs
- * @param {ID} nextID
- * @return {Array<GCRef|ItemRef>}
- *
- * @private
- * @function
- */
-const readStructRefs = (decoder, numOfStructs, nextID) => {
-  /**
-   * @type {Array<GCRef|ItemRef>}
-   */
-  const refs = []
-  for (let i = 0; i < numOfStructs; i++) {
-    const info = decoding.readUint8(decoder)
-    const ref = (binary.BITS5 & info) === 0 ? new GCRef(decoder, nextID, info) : new ItemRef(decoder, nextID, info)
-    nextID = createID(nextID.client, nextID.clock + ref.length)
-    refs.push(ref)
-  }
-  return refs
 }
 
 /**
@@ -103,7 +79,9 @@ export const writeClientsStructs = (encoder, store, _sm) => {
   })
   // write # states that were updated
   encoding.writeVarUint(encoder, sm.size)
-  sm.forEach((clock, client) => {
+  // Write items with higher client ids first
+  // This heavily improves the conflict algorithm.
+  Array.from(sm.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
     // @ts-ignore
     writeStructs(encoder, store.clients.get(client), client, clock)
   })
@@ -111,22 +89,30 @@ export const writeClientsStructs = (encoder, store, _sm) => {
 
 /**
  * @param {decoding.Decoder} decoder The decoder object to read data from.
- * @return {Map<number,Array<GCRef|ItemRef>>}
+ * @param {Map<number,Array<GC|Item>>} clientRefs
+ * @param {Doc} doc
+ * @return {Map<number,Array<GC|Item>>}
  *
  * @private
  * @function
  */
-export const readClientsStructRefs = decoder => {
-  /**
-   * @type {Map<number,Array<GCRef|ItemRef>>}
-   */
-  const clientRefs = new Map()
+export const readClientsStructRefs = (decoder, clientRefs, doc) => {
   const numOfStateUpdates = decoding.readVarUint(decoder)
   for (let i = 0; i < numOfStateUpdates; i++) {
     const numberOfStructs = decoding.readVarUint(decoder)
-    const nextID = readID(decoder)
-    const refs = readStructRefs(decoder, numberOfStructs, nextID)
-    clientRefs.set(nextID.client, refs)
+    /**
+     * @type {Array<GC|Item>}
+     */
+    const refs = []
+    let { client, clock } = readID(decoder)
+    let info, struct
+    clientRefs.set(client, refs)
+    for (let i = 0; i < numberOfStructs; i++) {
+      info = decoding.readUint8(decoder)
+      struct = (binary.BITS5 & info) === 0 ? new GC(createID(client, clock), decoding.readVarUint(decoder)) : readItem(decoder, createID(client, clock), info, doc)
+      refs.push(struct)
+      clock += struct.length
+    }
   }
   return clientRefs
 }
@@ -159,28 +145,36 @@ export const readClientsStructRefs = decoder => {
 const resumeStructIntegration = (transaction, store) => {
   const stack = store.pendingStack
   const clientsStructRefs = store.pendingClientsStructRefs
+  // sort them so that we take the higher id first, in case of conflicts the lower id will probably not conflict with the id from the higher user.
+  const clientsStructRefsIds = Array.from(clientsStructRefs.keys()).sort((a, b) => a - b)
+  let curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]))
   // iterate over all struct readers until we are done
-  while (stack.length !== 0 || clientsStructRefs.size !== 0) {
+  while (stack.length !== 0 || clientsStructRefsIds.length > 0) {
     if (stack.length === 0) {
       // take any first struct from clientsStructRefs and put it on the stack
-      const [client, structRefs] = clientsStructRefs.entries().next().value
-      stack.push(structRefs.refs[structRefs.i++])
-      if (structRefs.refs.length === structRefs.i) {
-        clientsStructRefs.delete(client)
+      if (curStructsTarget.i < curStructsTarget.refs.length) {
+        stack.push(curStructsTarget.refs[curStructsTarget.i++])
+      } else {
+        clientsStructRefsIds.pop()
+        if (clientsStructRefsIds.length > 0) {
+          curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]))
+        }
+        continue
       }
     }
     const ref = stack[stack.length - 1]
-    const m = ref._missing
-    const client = ref.id.client
+    const refID = ref.id
+    const client = refID.client
+    const refClock = refID.clock
     const localClock = getState(store, client)
-    const offset = ref.id.clock < localClock ? localClock - ref.id.clock : 0
-    if (ref.id.clock + offset !== localClock) {
+    const offset = refClock < localClock ? localClock - refClock : 0
+    if (refClock + offset !== localClock) {
       // A previous message from this client is missing
       // check if there is a pending structRef with a smaller clock and switch them
-      const structRefs = clientsStructRefs.get(client)
-      if (structRefs !== undefined) {
+      const structRefs = clientsStructRefs.get(client) || { refs: [], i: 0 }
+      if (structRefs.refs.length !== structRefs.i) {
         const r = structRefs.refs[structRefs.i]
-        if (r.id.clock < ref.id.clock) {
+        if (r.id.clock < refClock) {
           // put ref with smaller clock on stack instead and continue
           structRefs.refs[structRefs.i] = ref
           stack[stack.length - 1] = r
@@ -193,31 +187,23 @@ const resumeStructIntegration = (transaction, store) => {
       // wait until missing struct is available
       return
     }
-    while (m.length > 0) {
-      const missing = m[m.length - 1]
-      if (getState(store, missing.client) <= missing.clock) {
-        const client = missing.client
-        // get the struct reader that has the missing struct
-        const structRefs = clientsStructRefs.get(client)
-        if (structRefs === undefined) {
-          // This update message causally depends on another update message.
-          return
-        }
-        stack.push(structRefs.refs[structRefs.i++])
-        if (structRefs.i === structRefs.refs.length) {
-          clientsStructRefs.delete(client)
-        }
-        break
+    const missing = ref.getMissing(transaction, store)
+    if (missing !== null) {
+      // get the struct reader that has the missing struct
+      const structRefs = clientsStructRefs.get(missing) || { refs: [], i: 0 }
+      if (structRefs.refs.length === structRefs.i) {
+        // This update message causally depends on another update message.
+        return
       }
-      ref._missing.pop()
-    }
-    if (m.length === 0) {
+      stack.push(structRefs.refs[structRefs.i++])
+    } else {
       if (offset < ref.length) {
-        ref.toStruct(transaction, store, offset).integrate(transaction)
+        ref.integrate(transaction, offset)
       }
       stack.pop()
     }
   }
+  store.pendingClientsStructRefs.clear()
 }
 
 /**
@@ -246,7 +232,7 @@ export const writeStructsFromTransaction = (encoder, transaction) => writeClient
 
 /**
  * @param {StructStore} store
- * @param {Map<number, Array<GCRef|ItemRef>>} clientsStructsRefs
+ * @param {Map<number, Array<GC|Item>>} clientsStructsRefs
  *
  * @private
  * @function
@@ -270,6 +256,21 @@ const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
 }
 
 /**
+ * @param {Map<number,{refs:Array<GC|Item>,i:number}>} pendingClientsStructRefs
+ */
+const cleanupPendingStructs = pendingClientsStructRefs => {
+  // cleanup pendingClientsStructs if not fully finished
+  for (const [client, refs] of pendingClientsStructRefs) {
+    if (refs.i === refs.refs.length) {
+      pendingClientsStructRefs.delete(client)
+    } else {
+      refs.refs.splice(0, refs.i)
+      refs.i = 0
+    }
+  }
+}
+
+/**
  * Read the next Item in a Decoder and fill this Item with the read data.
  *
  * This is called when data is received from a remote peer.
@@ -282,9 +283,11 @@ const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
  * @function
  */
 export const readStructs = (decoder, transaction, store) => {
-  const clientsStructRefs = readClientsStructRefs(decoder)
+  const clientsStructRefs = new Map()
+  readClientsStructRefs(decoder, clientsStructRefs, transaction.doc)
   mergeReadStructsIntoPendingReads(store, clientsStructRefs)
   resumeStructIntegration(transaction, store)
+  cleanupPendingStructs(store.pendingClientsStructRefs)
   tryResumePendingDeleteReaders(transaction, store)
 }
 

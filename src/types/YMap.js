@@ -42,16 +42,26 @@ export class YMapEvent extends YEvent {
  * A shared Map implementation.
  *
  * @extends AbstractType<YMapEvent<T>>
- * @implements {IterableIterator}
+ * @implements {Iterable<T>}
  */
 export class YMap extends AbstractType {
-  constructor () {
+  /**
+   *
+   * @param {Iterable<readonly [string, any]>=} entries - an optional iterable to initialize the YMap
+   */
+  constructor (entries) {
     super()
     /**
      * @type {Map<string,any>?}
      * @private
      */
-    this._prelimContent = new Map()
+    this._prelimContent = null
+
+    if (entries === undefined) {
+      this._prelimContent = new Map()
+    } else {
+      this._prelimContent = new Map(entries)
+    }
   }
 
   /**
@@ -106,6 +116,15 @@ export class YMap extends AbstractType {
   }
 
   /**
+   * Returns the size of the YMap (count of key/value pairs)
+   *
+   * @return {number}
+   */
+  get size () {
+    return [...createMapIterator(this._map)].length
+  }
+
+  /**
    * Returns the keys for each element in the YMap Type.
    *
    * @return {IterableIterator<string>}
@@ -133,7 +152,7 @@ export class YMap extends AbstractType {
   }
 
   /**
-   * Executes a provided function on once on overy key-value pair.
+   * Executes a provided function on once on every key-value pair.
    *
    * @param {function(T,string,YMap<T>):void} f A function to execute on every element of this YArray.
    */

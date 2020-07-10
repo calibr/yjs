@@ -25,6 +25,7 @@ export class ItemInsertionResult extends ItemListPosition {
     constructor(left: Item | null, right: Item | null, negatedAttributes: Map<string, any>);
     negatedAttributes: Map<string, any>;
 }
+export function cleanupYTextFormatting(type: YText): number;
 /**
  * The Quill Delta format represents changes on a text document with
  * formatting information. For mor information visit {@link https://quilljs.com/docs/delta/|Quill Delta}
@@ -122,10 +123,15 @@ export class YText extends AbstractType<YTextEvent> {
      * Apply a {@link Delta} on this shared YText type.
      *
      * @param {any} delta The changes to apply on this element.
+     * @param {object}  [opts]
+     * @param {boolean} [opts.sanitize] Sanitize input delta. Removes ending newlines if set to true.
+     *
      *
      * @public
      */
-    applyDelta(delta: any): void;
+    applyDelta(delta: any, { sanitize }?: {
+        sanitize?: boolean;
+    } | undefined): void;
     /**
      * Returns the Delta representation of this YText type.
      *

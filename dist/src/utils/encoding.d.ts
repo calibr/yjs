@@ -1,5 +1,5 @@
 export function writeClientsStructs(encoder: encoding.Encoder, store: StructStore, _sm: Map<number, number>): void;
-export function readClientsStructRefs(decoder: decoding.Decoder): Map<number, (GCRef | ItemRef)[]>;
+export function readClientsStructRefs(decoder: decoding.Decoder, clientRefs: Map<number, (GC | Item)[]>, doc: Doc): Map<number, (GC | Item)[]>;
 export function tryResumePendingDeleteReaders(transaction: Transaction, store: StructStore): void;
 export function writeStructsFromTransaction(encoder: encoding.Encoder, transaction: Transaction): void;
 export function readStructs(decoder: decoding.Decoder, transaction: Transaction, store: StructStore): void;
@@ -15,7 +15,7 @@ export function encodeStateVector(doc: Doc): Uint8Array;
 import * as encoding from "lib0/encoding";
 import { StructStore } from "./StructStore.js";
 import * as decoding from "lib0/decoding";
-import { GCRef } from "../structs/GC.js";
-import { ItemRef } from "../structs/Item.js";
-import { Transaction } from "./Transaction.js";
+import { GC } from "../structs/GC.js";
+import { Item } from "../structs/Item.js";
 import { Doc } from "./Doc.js";
+import { Transaction } from "./Transaction.js";

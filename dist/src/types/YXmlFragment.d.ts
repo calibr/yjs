@@ -24,7 +24,7 @@
  * Can be created with {@link YXmlFragment#createTreeWalker}
  *
  * @public
- * @implements {IterableIterator}
+ * @implements {Iterable<YXmlElement|YXmlText|YXmlElement|YXmlHook>}
  */
 export class YXmlTreeWalker {
     /**

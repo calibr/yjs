@@ -11,6 +11,33 @@ import * as prng from 'lib0/prng.js'
 /**
  * @param {t.TestCase} tc
  */
+export const testMapHavingIterableAsConstructorParamTests = tc => {
+  const { map0 } = init(tc, { users: 1 })
+
+  const m1 = new Y.Map(Object.entries({ number: 1, string: 'hello' }))
+  map0.set('m1', m1)
+  t.assert(m1.get('number') === 1)
+  t.assert(m1.get('string') === 'hello')
+
+  const m2 = new Y.Map([
+    ['object', { x: 1 }],
+    ['boolean', true]
+  ])
+  map0.set('m2', m2)
+  t.assert(m2.get('object').x === 1)
+  t.assert(m2.get('boolean') === true)
+
+  const m3 = new Y.Map([...m1, ...m2])
+  map0.set('m3', m3)
+  t.assert(m3.get('number') === 1)
+  t.assert(m3.get('string') === 'hello')
+  t.assert(m3.get('object').x === 1)
+  t.assert(m3.get('boolean') === true)
+}
+
+/**
+ * @param {t.TestCase} tc
+ */
 export const testBasicMapTests = tc => {
   const { testConnector, users, map0, map1, map2 } = init(tc, { users: 3 })
   users[2].disconnect()
@@ -33,6 +60,7 @@ export const testBasicMapTests = tc => {
   t.assert(map0.get('boolean1') === true, 'client 0 computed the change (boolean)')
   t.compare(map0.get('object'), { key: { key2: 'value' } }, 'client 0 computed the change (object)')
   t.assert(map0.get('y-map').get('y-array').get(0) === -1, 'client 0 computed the change (type)')
+  t.assert(map0.size === 6, 'client 0 map has correct size')
 
   users[2].connect()
   testConnector.flushAllMessages()
@@ -43,6 +71,7 @@ export const testBasicMapTests = tc => {
   t.assert(map1.get('boolean1') === true, 'client 1 computed the change (boolean)')
   t.compare(map1.get('object'), { key: { key2: 'value' } }, 'client 1 received the update (object)')
   t.assert(map1.get('y-map').get('y-array').get(0) === -1, 'client 1 received the update (type)')
+  t.assert(map1.size === 6, 'client 1 map has correct size')
 
   // compare disconnected user
   t.assert(map2.get('number') === 1, 'client 2 received the update (number) - was disconnected')
@@ -128,6 +157,20 @@ export const testGetAndSetOfMapPropertyWithConflict = tc => {
     t.compare(u.get('stuff'), 'c1')
   }
   compare(users)
+}
+
+/**
+ * @param {t.TestCase} tc
+ */
+export const testSizeAndDeleteOfMapProperty = tc => {
+  const { map0 } = init(tc, { users: 1 })
+  map0.set('stuff', 'c0')
+  map0.set('otherstuff', 'c1')
+  t.assert(map0.size === 2, `map size is ${map0.size} expected 2`)
+  map0.delete('stuff')
+  t.assert(map0.size === 1, `map size after delete is ${map0.size}, expected 1`)
+  map0.delete('otherstuff')
+  t.assert(map0.size === 0, `map size after delete is ${map0.size}, expected 0`)
 }
 
 /**
@@ -454,7 +497,7 @@ const mapTransactions = [
  * @param {t.TestCase} tc
  */
 export const testRepeatGeneratingYmapTests10 = tc => {
-  applyRandomTests(tc, mapTransactions, 10)
+  applyRandomTests(tc, mapTransactions, 3)
 }
 
 /**

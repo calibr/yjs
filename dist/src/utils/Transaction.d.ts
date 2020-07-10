@@ -63,9 +63,9 @@ export class Transaction {
      */
     changedParentTypes: Map<AbstractType<YEvent>, Array<YEvent>>;
     /**
-     * @type {Set<ID>}
+     * @type {Array<AbstractStruct>}
      */
-    _mergeStructs: Set<ID>;
+    _mergeStructs: Array<AbstractStruct>;
     /**
      * @type {any}
      */
@@ -90,7 +90,8 @@ import { Doc } from "./Doc.js";
 import { DeleteSet } from "./DeleteSet.js";
 import { AbstractType } from "../types/AbstractType.js";
 import { YEvent } from "./YEvent.js";
-import { ID } from "./ID.js";
+import { AbstractStruct } from "../structs/AbstractStruct.js";
 import * as encoding from "lib0/encoding";
+import { ID } from "./ID.js";
 import { StructStore } from "./StructStore.js";
 import { Item } from "../structs/Item.js";

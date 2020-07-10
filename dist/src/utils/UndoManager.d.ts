@@ -94,13 +94,13 @@ import { Item } from "../structs/Item.js";
 declare class StackItem {
     /**
      * @param {DeleteSet} ds
-     * @param {number} start clock start of the local client
-     * @param {number} len
+     * @param {Map<number,number>} beforeState
+     * @param {Map<number,number>} afterState
      */
-    constructor(ds: DeleteSet, start: number, len: number);
+    constructor(ds: DeleteSet, beforeState: Map<number, number>, afterState: Map<number, number>);
     ds: DeleteSet;
-    start: number;
-    len: number;
+    beforeState: Map<number, number>;
+    afterState: Map<number, number>;
     /**
      * Use this to save and restore metadata like selection range
      */

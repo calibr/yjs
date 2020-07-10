@@ -1,3 +1,4 @@
+export function getTypeChildren(t: AbstractType<any>): Item[];
 export function callTypeObservers<EventType>(type: AbstractType<EventType>, transaction: Transaction, event: EventType): void;
 /**
  * @template EventType
@@ -121,8 +122,8 @@ export function typeMapGetSnapshot(parent: AbstractType<any>, key: string, snaps
     [x: string]: any;
 } | undefined;
 export function createMapIterator(map: Map<string, Item>): IterableIterator<any[]>;
-import { Transaction } from "../utils/Transaction.js";
 import { Item } from "../structs/Item.js";
+import { Transaction } from "../utils/Transaction.js";
 import { Doc } from "../utils/Doc.js";
 import { EventHandler } from "../utils/EventHandler.js";
 import { YEvent } from "../utils/YEvent.js";

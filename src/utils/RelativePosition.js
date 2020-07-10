@@ -1,12 +1,12 @@
 
 import {
-  createID,
   writeID,
   readID,
   compareIDs,
   getState,
   findRootTypeKey,
   Item,
+  createID,
   ContentType,
   followRedone,
   ID, Doc, AbstractType // eslint-disable-line
@@ -107,7 +107,7 @@ export const createRelativePosition = (type, item) => {
   if (type._item === null) {
     tname = findRootTypeKey(type)
   } else {
-    typeid = type._item.id
+    typeid = createID(type._item.id.client, type._item.id.clock)
   }
   return new RelativePosition(typeid, tname, item)
 }
@@ -227,7 +227,7 @@ export const createAbsolutePositionFromRelativePosition = (rpos, doc) => {
     if (!(right instanceof Item)) {
       return null
     }
-    type = right.parent
+    type = /** @type {AbstractType<any>} */ (right.parent)
     if (type._item === null || !type._item.deleted) {
       index = right.deleted || !right.countable ? 0 : res.diff
       let n = right.left

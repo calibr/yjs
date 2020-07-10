@@ -6,23 +6,27 @@
 import {
   YEvent,
   AbstractType,
-  nextID,
-  createID,
   getItemCleanStart,
+  getState,
   isVisible,
+  createID,
   YTextRefID,
   callTypeObservers,
   transact,
   ContentEmbed,
+  GC,
   ContentFormat,
   ContentString,
   splitSnapshotAffectedStructs,
+  iterateDeletedStructs,
+  iterateStructs,
   ID, Doc, Item, Snapshot, Transaction // eslint-disable-line
 } from '../internals.js'
 
 import * as decoding from 'lib0/decoding.js' // eslint-disable-line
 import * as encoding from 'lib0/encoding.js'
 import * as object from 'lib0/object.js'
+import * as map from 'lib0/map.js'
 
 /**
  * @param {any} a
@@ -122,15 +126,14 @@ const findPosition = (transaction, parent, index) => {
  *
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} negatedAttributes
- * @return {ItemListPosition}
  *
  * @private
  * @function
  */
-const insertNegatedAttributes = (transaction, parent, left, right, negatedAttributes) => {
+const insertNegatedAttributes = (transaction, parent, currPos, negatedAttributes) => {
+  let { left, right } = currPos
   // check if we really need to remove attributes
   while (
     right !== null && (
@@ -146,11 +149,14 @@ const insertNegatedAttributes = (transaction, parent, left, right, negatedAttrib
     left = right
     right = right.right
   }
+  const doc = transaction.doc
+  const ownClientId = doc.clientID
   for (const [key, val] of negatedAttributes) {
-    left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentFormat(key, val))
-    left.integrate(transaction)
+    left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val))
+    left.integrate(transaction, 0)
   }
-  return { left, right }
+  currPos.left = left
+  currPos.right = right
 }
 
 /**
@@ -170,17 +176,16 @@ const updateCurrentAttributes = (currentAttributes, format) => {
 }
 
 /**
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {Object<string,any>} attributes
- * @return {ItemListPosition}
  *
  * @private
  * @function
  */
-const minimizeAttributeChanges = (left, right, currentAttributes, attributes) => {
+const minimizeAttributeChanges = (currPos, currentAttributes, attributes) => {
   // go right while attributes[right.key] === right.value (or right is deleted)
+  let { left, right } = currPos
   while (true) {
     if (right === null) {
       break
@@ -195,22 +200,24 @@ const minimizeAttributeChanges = (left, right, currentAttributes, attributes) =>
     left = right
     right = right.right
   }
-  return new ItemListPosition(left, right)
+  currPos.left = left
+  currPos.right = right
 }
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {Object<string,any>} attributes
- * @return {ItemInsertionResult}
+ * @return {Map<string,any>}
  *
  * @private
  * @function
  **/
-const insertAttributes = (transaction, parent, left, right, currentAttributes, attributes) => {
+const insertAttributes = (transaction, parent, currPos, currentAttributes, attributes) => {
+  const doc = transaction.doc
+  const ownClientId = doc.clientID
   const negatedAttributes = new Map()
   // insert format-start items
   for (const key in attributes) {
@@ -219,62 +226,60 @@ const insertAttributes = (transaction, parent, left, right, currentAttributes, a
     if (!equalAttrs(currentVal, val)) {
       // save negated attribute (set null if currentVal undefined)
       negatedAttributes.set(key, currentVal)
-      left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentFormat(key, val))
-      left.integrate(transaction)
+      const { left, right } = currPos
+      currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val))
+      currPos.left.integrate(transaction, 0)
     }
   }
-  return new ItemInsertionResult(left, right, negatedAttributes)
+  return negatedAttributes
 }
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {string|object} text
  * @param {Object<string,any>} attributes
- * @return {ItemListPosition}
  *
  * @private
  * @function
  **/
-const insertText = (transaction, parent, left, right, currentAttributes, text, attributes) => {
+const insertText = (transaction, parent, currPos, currentAttributes, text, attributes) => {
   for (const [key] of currentAttributes) {
     if (attributes[key] === undefined) {
       attributes[key] = null
     }
   }
-  const minPos = minimizeAttributeChanges(left, right, currentAttributes, attributes)
-  const insertPos = insertAttributes(transaction, parent, minPos.left, minPos.right, currentAttributes, attributes)
-  left = insertPos.left
-  right = insertPos.right
+  const doc = transaction.doc
+  const ownClientId = doc.clientID
+  minimizeAttributeChanges(currPos, currentAttributes, attributes)
+  const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes)
   // insert content
   const content = text.constructor === String ? new ContentString(/** @type {string} */ (text)) : new ContentEmbed(text)
-  left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, content)
-  left.integrate(transaction)
-  return insertNegatedAttributes(transaction, parent, left, insertPos.right, insertPos.negatedAttributes)
+  const { left, right } = currPos
+  currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, content)
+  currPos.left.integrate(transaction, 0)
+  return insertNegatedAttributes(transaction, parent, currPos, negatedAttributes)
 }
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {number} length
  * @param {Object<string,any>} attributes
- * @return {ItemListPosition}
  *
  * @private
  * @function
  */
-const formatText = (transaction, parent, left, right, currentAttributes, length, attributes) => {
-  const minPos = minimizeAttributeChanges(left, right, currentAttributes, attributes)
-  const insertPos = insertAttributes(transaction, parent, minPos.left, minPos.right, currentAttributes, attributes)
-  const negatedAttributes = insertPos.negatedAttributes
-  left = insertPos.left
-  right = insertPos.right
+const formatText = (transaction, parent, currPos, currentAttributes, length, attributes) => {
+  const doc = transaction.doc
+  const ownClientId = doc.clientID
+  minimizeAttributeChanges(currPos, currentAttributes, attributes)
+  const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes)
+  let { left, right } = currPos
   // iterate until first non-format or null is found
   // delete all formats with attributes[format.key] != null
   while (length > 0 && right !== null) {
@@ -314,16 +319,121 @@ const formatText = (transaction, parent, left, right, currentAttributes, length,
     for (; length > 0; length--) {
       newlines += '\n'
     }
-    left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentString(newlines))
-    left.integrate(transaction)
+    left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentString(newlines))
+    left.integrate(transaction, 0)
   }
-  return insertNegatedAttributes(transaction, parent, left, right, negatedAttributes)
+  currPos.left = left
+  currPos.right = right
+  insertNegatedAttributes(transaction, parent, currPos, negatedAttributes)
+}
+
+/**
+ * Call this function after string content has been deleted in order to
+ * clean up formatting Items.
+ *
+ * @param {Transaction} transaction
+ * @param {Item} start
+ * @param {Item|null} end exclusive end, automatically iterates to the next Content Item
+ * @param {Map<string,any>} startAttributes
+ * @param {Map<string,any>} endAttributes This attribute is modified!
+ * @return {number} The amount of formatting Items deleted.
+ *
+ * @function
+ */
+const cleanupFormattingGap = (transaction, start, end, startAttributes, endAttributes) => {
+  while (end && end.content.constructor !== ContentString && end.content.constructor !== ContentEmbed) {
+    if (!end.deleted && end.content.constructor === ContentFormat) {
+      updateCurrentAttributes(endAttributes, /** @type {ContentFormat} */ (end.content))
+    }
+    end = end.right
+  }
+  let cleanups = 0
+  while (start !== end) {
+    if (!start.deleted) {
+      const content = start.content
+      switch (content.constructor) {
+        case ContentFormat: {
+          const { key, value } = /** @type {ContentFormat} */ (content)
+          if ((endAttributes.get(key) || null) !== value || (startAttributes.get(key) || null) === value) {
+            // Either this format is overwritten or it is not necessary because the attribute already existed.
+            start.delete(transaction)
+            cleanups++
+          }
+          break
+        }
+      }
+    }
+    start = /** @type {Item} */ (start.right)
+  }
+  return cleanups
 }
 
 /**
  * @param {Transaction} transaction
- * @param {Item|null} left
- * @param {Item|null} right
+ * @param {Item | null} item
+ */
+const cleanupContextlessFormattingGap = (transaction, item) => {
+  // iterate until item.right is null or content
+  while (item && item.right && (item.right.deleted || (item.right.content.constructor !== ContentString && item.right.content.constructor !== ContentEmbed))) {
+    item = item.right
+  }
+  const attrs = new Set()
+  // iterate back until a content item is found
+  while (item && (item.deleted || (item.content.constructor !== ContentString && item.content.constructor !== ContentEmbed))) {
+    if (!item.deleted && item.content.constructor === ContentFormat) {
+      const key = /** @type {ContentFormat} */ (item.content).key
+      if (attrs.has(key)) {
+        item.delete(transaction)
+      } else {
+        attrs.add(key)
+      }
+    }
+    item = item.left
+  }
+}
+
+/**
+ * This function is experimental and subject to change / be removed.
+ *
+ * Ideally, we don't need this function at all. Formatting attributes should be cleaned up
+ * automatically after each change. This function iterates twice over the complete YText type
+ * and removes unnecessary formatting attributes. This is also helpful for testing.
+ *
+ * This function won't be exported anymore as soon as there is confidence that the YText type works as intended.
+ *
+ * @param {YText} type
+ * @return {number} How many formatting attributes have been cleaned up.
+ */
+export const cleanupYTextFormatting = type => {
+  let res = 0
+  transact(/** @type {Doc} */ (type.doc), transaction => {
+    let start = /** @type {Item} */ (type._start)
+    let end = type._start
+    let startAttributes = map.create()
+    const currentAttributes = map.copy(startAttributes)
+    while (end) {
+      if (end.deleted === false) {
+        switch (end.content.constructor) {
+          case ContentFormat:
+            updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (end.content))
+            break
+          case ContentEmbed:
+          case ContentString:
+            res += cleanupFormattingGap(transaction, start, end, startAttributes, currentAttributes)
+            startAttributes = map.copy(currentAttributes)
+            start = end
+            break
+        }
+      }
+      end = end.right
+    }
+  })
+  return res
+}
+
+/**
+ * @param {Transaction} transaction
+ * @param {ItemListPosition} currPos
  * @param {Map<string,any>} currentAttributes
  * @param {number} length
  * @return {ItemListPosition}
@@ -331,7 +441,10 @@ const formatText = (transaction, parent, left, right, currentAttributes, length,
  * @private
  * @function
  */
-const deleteText = (transaction, left, right, currentAttributes, length) => {
+const deleteText = (transaction, currPos, currentAttributes, length) => {
+  const startAttrs = map.copy(currentAttributes)
+  const start = currPos.right
+  let { left, right } = currPos
   while (length > 0 && right !== null) {
     if (right.deleted === false) {
       switch (right.content.constructor) {
@@ -351,7 +464,12 @@ const deleteText = (transaction, left, right, currentAttributes, length) => {
     left = right
     right = right.right
   }
-  return { left, right }
+  if (start) {
+    cleanupFormattingGap(transaction, start, right, startAttrs, map.copy(currentAttributes))
+  }
+  currPos.left = left
+  currPos.right = right
+  return currPos
 }
 
 /**
@@ -649,7 +767,48 @@ export class YText extends AbstractType {
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
    */
   _callObserver (transaction, parentSubs) {
-    callTypeObservers(this, transaction, new YTextEvent(this, transaction))
+    const event = new YTextEvent(this, transaction)
+    const doc = transaction.doc
+    // If a remote change happened, we try to cleanup potential formatting duplicates.
+    if (!transaction.local) {
+      // check if another formatting item was inserted
+      let foundFormattingItem = false
+      for (const [client, afterClock] of transaction.afterState) {
+        const clock = transaction.beforeState.get(client) || 0
+        if (afterClock === clock) {
+          continue
+        }
+        iterateStructs(transaction, /** @type {Array<Item|GC>} */ (doc.store.clients.get(client)), clock, afterClock, item => {
+          // @ts-ignore
+          if (!item.deleted && item.content.constructor === ContentFormat) {
+            foundFormattingItem = true
+          }
+        })
+        if (foundFormattingItem) {
+          break
+        }
+      }
+      transact(doc, t => {
+        if (foundFormattingItem) {
+          // If a formatting item was inserted, we simply clean the whole type.
+          // We need to compute currentAttributes for the current position anyway.
+          cleanupYTextFormatting(this)
+        } else {
+          // If no formatting attribute was inserted, we can make due with contextless
+          // formatting cleanups.
+          // Contextless: it is not necessary to compute currentAttributes for the affected position.
+          iterateDeletedStructs(t, transaction.deleteSet, item => {
+            if (item instanceof GC) {
+              return
+            }
+            if (item.parent === this) {
+              cleanupContextlessFormattingGap(t, item)
+            }
+          })
+        }
+      })
+    }
+    callTypeObservers(this, transaction, event)
   }
 
   /**
@@ -686,16 +845,19 @@ export class YText extends AbstractType {
    * Apply a {@link Delta} on this shared YText type.
    *
    * @param {any} delta The changes to apply on this element.
+   * @param {object}  [opts]
+   * @param {boolean} [opts.sanitize] Sanitize input delta. Removes ending newlines if set to true.
+   *
    *
    * @public
    */
-  applyDelta (delta) {
+  applyDelta (delta, { sanitize = true } = {}) {
     if (this.doc !== null) {
       transact(this.doc, transaction => {
         /**
          * @type {ItemListPosition}
          */
-        let pos = new ItemListPosition(null, this._start)
+        const currPos = new ItemListPosition(null, this._start)
         const currentAttributes = new Map()
         for (let i = 0; i < delta.length; i++) {
           const op = delta[i]
@@ -705,14 +867,14 @@ export class YText extends AbstractType {
             // there is a newline at the end of the content.
             // If we omit this step, clients will see a different number of
             // paragraphs, but nothing bad will happen.
-            const ins = (typeof op.insert === 'string' && i === delta.length - 1 && pos.right === null && op.insert.slice(-1) === '\n') ? op.insert.slice(0, -1) : op.insert
+            const ins = (!sanitize && typeof op.insert === 'string' && i === delta.length - 1 && currPos.right === null && op.insert.slice(-1) === '\n') ? op.insert.slice(0, -1) : op.insert
             if (typeof ins !== 'string' || ins.length > 0) {
-              pos = insertText(transaction, this, pos.left, pos.right, currentAttributes, ins, op.attributes || {})
+              insertText(transaction, this, currPos, currentAttributes, ins, op.attributes || {})
             }
           } else if (op.retain !== undefined) {
-            pos = formatText(transaction, this, pos.left, pos.right, currentAttributes, op.retain, op.attributes || {})
+            formatText(transaction, this, currPos, currentAttributes, op.retain, op.attributes || {})
           } else if (op.delete !== undefined) {
-            pos = deleteText(transaction, pos.left, pos.right, currentAttributes, op.delete)
+            deleteText(transaction, currPos, currentAttributes, op.delete)
           }
         }
       })
@@ -850,7 +1012,7 @@ export class YText extends AbstractType {
           // @ts-ignore
           currentAttributes.forEach((v, k) => { attributes[k] = v })
         }
-        insertText(transaction, this, left, right, currentAttributes, text, attributes)
+        insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, text, attributes)
       })
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.insert(index, text, attributes))
@@ -875,7 +1037,7 @@ export class YText extends AbstractType {
     if (y !== null) {
       transact(y, transaction => {
         const { left, right, currentAttributes } = findPosition(transaction, this, index)
-        insertText(transaction, this, left, right, currentAttributes, embed, attributes)
+        insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, embed, attributes)
       })
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.insertEmbed(index, embed, attributes))
@@ -898,7 +1060,7 @@ export class YText extends AbstractType {
     if (y !== null) {
       transact(y, transaction => {
         const { left, right, currentAttributes } = findPosition(transaction, this, index)
-        deleteText(transaction, left, right, currentAttributes, length)
+        deleteText(transaction, new ItemListPosition(left, right), currentAttributes, length)
       })
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.delete(index, length))
@@ -916,6 +1078,9 @@ export class YText extends AbstractType {
    * @public
    */
   format (index, length, attributes) {
+    if (length === 0) {
+      return
+    }
     const y = this.doc
     if (y !== null) {
       transact(y, transaction => {
@@ -923,7 +1088,7 @@ export class YText extends AbstractType {
         if (right === null) {
           return
         }
-        formatText(transaction, this, left, right, currentAttributes, length, attributes)
+        formatText(transaction, this, new ItemListPosition(left, right), currentAttributes, length, attributes)
       })
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.format(index, length, attributes))

@@ -98,6 +98,20 @@
   const create = () => new Map();
 
   /**
+   * Copy a Map object into a fresh Map object.
+   *
+   * @function
+   * @template X,Y
+   * @param {Map<X,Y>} m
+   * @return {Map<X,Y>}
+   */
+  const copy = m => {
+    const r = create();
+    m.forEach((v, k) => { r.set(k, v); });
+    return r
+  };
+
+  /**
    * Get map property. Create T if property is undefined and set T on map.
    *
    * ```js
@@ -165,6 +179,8 @@
    *
    * @module string
    */
+
+  const fromCharCode = String.fromCharCode;
   const fromCodePoint = String.fromCodePoint;
 
   /**
@@ -434,6 +450,29 @@
    */
   const createUint8ArrayViewFromArrayBuffer = (buffer, byteOffset, length) => new Uint8Array(buffer, byteOffset, length);
 
+  /* istanbul ignore next */
+  /**
+   * @param {string} s
+   * @return {Uint8Array}
+   */
+  const fromBase64Browser = s => {
+    // eslint-disable-next-line no-undef
+    const a = atob(s);
+    const bytes = createUint8ArrayFromLen(a.length);
+    for (let i = 0; i < a.length; i++) {
+      bytes[i] = a.charCodeAt(i);
+    }
+    return bytes
+  };
+
+  /**
+   * @param {string} s
+   */
+  const fromBase64Node = s => new Uint8Array(Buffer.from(s, 'base64').buffer);
+
+  /* istanbul ignore next */
+  const fromBase64 = isBrowser ? fromBase64Browser : fromBase64Node;
+
   /**
    * Copy the content of an Uint8Array view to a new ArrayBuffer.
    *
@@ -447,6 +486,21 @@
   };
 
   /* eslint-env browser */
+
+  /**
+   * Binary data constants.
+   *
+   * @module binary
+   */
+
+  /**
+   * n-th bit activated.
+   *
+   * @type {number}
+   */
+  const BIT1 = 1;
+  const BIT2 = 2;
+  const BIT3 = 4;
   const BIT6 = 32;
   const BIT7 = 64;
   const BIT8 = 128;
@@ -1507,6 +1561,8 @@
    * @module Y
    */
 
+  const generateNewClientId = uint32;
+
   /**
    * A Yjs instance handles the state of shared data.
    * @extends Observable<string>
@@ -1521,7 +1577,7 @@
       super();
       this.gc = gc;
       this.gcFilter = gcFilter;
-      this.clientID = uint32();
+      this.clientID = generateNewClientId();
       /**
        * @type {Map<string, AbstractType<YEvent>>}
        */
@@ -1553,17 +1609,17 @@
     }
 
     /**
-     * Define a shared data type.
+     * Get a shared data type by name. If it does not yet exist, define its type.
      *
      * Multiple calls of `y.get(name, TypeConstructor)` yield the same result
-     * and do not overwrite each other. I.e.
-     * `y.define(name, Y.Array) === y.define(name, Y.Array)`
+     * and do not overwrite each other, i.e.
+     *   `y.get(name, Y.Array) === y.get(name, Y.Array)`
      *
      * After this method is called, the type is also available on `y.share.get(name)`.
      *
      * *Best Practices:*
      * Define all types right after the Yjs instance is created and store them in a separate object.
-     * Also use the typed methods `getText(name)`, `getArray(name)`, ..
+     * Also use the typed methods `getText(name)`, `getArray(name)`, `getMap(name)`, etc.
      *
      * @example
      *   const y = new Y(..)
@@ -1684,7 +1740,7 @@
 
   /**
    * @param {encoding.Encoder} encoder
-   * @param {Array<AbstractStruct>} structs All structs by `client`
+   * @param {Array<GC|Item>} structs All structs by `client`
    * @param {number} client
    * @param {number} clock write structs starting with `ID(client,clock)`
    *
@@ -1698,33 +1754,10 @@
     writeID(encoder, createID(client, clock));
     const firstStruct = structs[startNewStructs];
     // write first struct with an offset
-    firstStruct.write(encoder, clock - firstStruct.id.clock, 0);
+    firstStruct.write(encoder, clock - firstStruct.id.clock);
     for (let i = startNewStructs + 1; i < structs.length; i++) {
-      structs[i].write(encoder, 0, 0);
+      structs[i].write(encoder, 0);
     }
-  };
-
-  /**
-   * @param {decoding.Decoder} decoder
-   * @param {number} numOfStructs
-   * @param {ID} nextID
-   * @return {Array<GCRef|ItemRef>}
-   *
-   * @private
-   * @function
-   */
-  const readStructRefs = (decoder, numOfStructs, nextID) => {
-    /**
-     * @type {Array<GCRef|ItemRef>}
-     */
-    const refs = [];
-    for (let i = 0; i < numOfStructs; i++) {
-      const info = readUint8(decoder);
-      const ref = (BITS5 & info) === 0 ? new GCRef(decoder, nextID, info) : new ItemRef(decoder, nextID, info);
-      nextID = createID(nextID.client, nextID.clock + ref.length);
-      refs.push(ref);
-    }
-    return refs
   };
 
   /**
@@ -1751,7 +1784,9 @@
     });
     // write # states that were updated
     writeVarUint(encoder, sm.size);
-    sm.forEach((clock, client) => {
+    // Write items with higher client ids first
+    // This heavily improves the conflict algorithm.
+    Array.from(sm.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
       // @ts-ignore
       writeStructs(encoder, store.clients.get(client), client, clock);
     });
@@ -1759,22 +1794,30 @@
 
   /**
    * @param {decoding.Decoder} decoder The decoder object to read data from.
-   * @return {Map<number,Array<GCRef|ItemRef>>}
+   * @param {Map<number,Array<GC|Item>>} clientRefs
+   * @param {Doc} doc
+   * @return {Map<number,Array<GC|Item>>}
    *
    * @private
    * @function
    */
-  const readClientsStructRefs = decoder => {
-    /**
-     * @type {Map<number,Array<GCRef|ItemRef>>}
-     */
-    const clientRefs = new Map();
+  const readClientsStructRefs = (decoder, clientRefs, doc) => {
     const numOfStateUpdates = readVarUint(decoder);
     for (let i = 0; i < numOfStateUpdates; i++) {
       const numberOfStructs = readVarUint(decoder);
-      const nextID = readID(decoder);
-      const refs = readStructRefs(decoder, numberOfStructs, nextID);
-      clientRefs.set(nextID.client, refs);
+      /**
+       * @type {Array<GC|Item>}
+       */
+      const refs = [];
+      let { client, clock } = readID(decoder);
+      let info, struct;
+      clientRefs.set(client, refs);
+      for (let i = 0; i < numberOfStructs; i++) {
+        info = readUint8(decoder);
+        struct = (BITS5 & info) === 0 ? new GC(createID(client, clock), readVarUint(decoder)) : readItem(decoder, createID(client, clock), info, doc);
+        refs.push(struct);
+        clock += struct.length;
+      }
     }
     return clientRefs
   };
@@ -1807,28 +1850,36 @@
   const resumeStructIntegration = (transaction, store) => {
     const stack = store.pendingStack;
     const clientsStructRefs = store.pendingClientsStructRefs;
+    // sort them so that we take the higher id first, in case of conflicts the lower id will probably not conflict with the id from the higher user.
+    const clientsStructRefsIds = Array.from(clientsStructRefs.keys()).sort((a, b) => a - b);
+    let curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
     // iterate over all struct readers until we are done
-    while (stack.length !== 0 || clientsStructRefs.size !== 0) {
+    while (stack.length !== 0 || clientsStructRefsIds.length > 0) {
       if (stack.length === 0) {
         // take any first struct from clientsStructRefs and put it on the stack
-        const [client, structRefs] = clientsStructRefs.entries().next().value;
-        stack.push(structRefs.refs[structRefs.i++]);
-        if (structRefs.refs.length === structRefs.i) {
-          clientsStructRefs.delete(client);
+        if (curStructsTarget.i < curStructsTarget.refs.length) {
+          stack.push(curStructsTarget.refs[curStructsTarget.i++]);
+        } else {
+          clientsStructRefsIds.pop();
+          if (clientsStructRefsIds.length > 0) {
+            curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
+          }
+          continue
         }
       }
       const ref = stack[stack.length - 1];
-      const m = ref._missing;
-      const client = ref.id.client;
+      const refID = ref.id;
+      const client = refID.client;
+      const refClock = refID.clock;
       const localClock = getState(store, client);
-      const offset = ref.id.clock < localClock ? localClock - ref.id.clock : 0;
-      if (ref.id.clock + offset !== localClock) {
+      const offset = refClock < localClock ? localClock - refClock : 0;
+      if (refClock + offset !== localClock) {
         // A previous message from this client is missing
         // check if there is a pending structRef with a smaller clock and switch them
-        const structRefs = clientsStructRefs.get(client);
-        if (structRefs !== undefined) {
+        const structRefs = clientsStructRefs.get(client) || { refs: [], i: 0 };
+        if (structRefs.refs.length !== structRefs.i) {
           const r = structRefs.refs[structRefs.i];
-          if (r.id.clock < ref.id.clock) {
+          if (r.id.clock < refClock) {
             // put ref with smaller clock on stack instead and continue
             structRefs.refs[structRefs.i] = ref;
             stack[stack.length - 1] = r;
@@ -1841,31 +1892,23 @@
         // wait until missing struct is available
         return
       }
-      while (m.length > 0) {
-        const missing = m[m.length - 1];
-        if (getState(store, missing.client) <= missing.clock) {
-          const client = missing.client;
-          // get the struct reader that has the missing struct
-          const structRefs = clientsStructRefs.get(client);
-          if (structRefs === undefined) {
-            // This update message causally depends on another update message.
-            return
-          }
-          stack.push(structRefs.refs[structRefs.i++]);
-          if (structRefs.i === structRefs.refs.length) {
-            clientsStructRefs.delete(client);
-          }
-          break
+      const missing = ref.getMissing(transaction, store);
+      if (missing !== null) {
+        // get the struct reader that has the missing struct
+        const structRefs = clientsStructRefs.get(missing) || { refs: [], i: 0 };
+        if (structRefs.refs.length === structRefs.i) {
+          // This update message causally depends on another update message.
+          return
         }
-        ref._missing.pop();
-      }
-      if (m.length === 0) {
+        stack.push(structRefs.refs[structRefs.i++]);
+      } else {
         if (offset < ref.length) {
-          ref.toStruct(transaction, store, offset).integrate(transaction);
+          ref.integrate(transaction, offset);
         }
         stack.pop();
       }
     }
+    store.pendingClientsStructRefs.clear();
   };
 
   /**
@@ -1894,7 +1937,7 @@
 
   /**
    * @param {StructStore} store
-   * @param {Map<number, Array<GCRef|ItemRef>>} clientsStructsRefs
+   * @param {Map<number, Array<GC|Item>>} clientsStructsRefs
    *
    * @private
    * @function
@@ -1918,6 +1961,21 @@
   };
 
   /**
+   * @param {Map<number,{refs:Array<GC|Item>,i:number}>} pendingClientsStructRefs
+   */
+  const cleanupPendingStructs = pendingClientsStructRefs => {
+    // cleanup pendingClientsStructs if not fully finished
+    for (const [client, refs] of pendingClientsStructRefs) {
+      if (refs.i === refs.refs.length) {
+        pendingClientsStructRefs.delete(client);
+      } else {
+        refs.refs.splice(0, refs.i);
+        refs.i = 0;
+      }
+    }
+  };
+
+  /**
    * Read the next Item in a Decoder and fill this Item with the read data.
    *
    * This is called when data is received from a remote peer.
@@ -1930,9 +1988,11 @@
    * @function
    */
   const readStructs = (decoder, transaction, store) => {
-    const clientsStructRefs = readClientsStructRefs(decoder);
+    const clientsStructRefs = new Map();
+    readClientsStructRefs(decoder, clientsStructRefs, transaction.doc);
     mergeReadStructsIntoPendingReads(store, clientsStructRefs);
     resumeStructIntegration(transaction, store);
+    cleanupPendingStructs(store.pendingClientsStructRefs);
     tryResumePendingDeleteReaders(transaction, store);
   };
 
@@ -1951,7 +2011,7 @@
     transact(ydoc, transaction => {
       readStructs(decoder, transaction, ydoc.store);
       let allowDeletes = true;
-      if (typeof transactionOrigin === 'object' && transactionOrigin.disableDeletes === true) {
+      if (typeof transactionOrigin === 'object' && transactionOrigin && transactionOrigin.disableDeletes === true) {
         allowDeletes = false;
       }
       if (allowDeletes) {
@@ -2382,7 +2442,7 @@
       if (child.parent === parent) {
         return true
       }
-      child = child.parent._item;
+      child = /** @type {AbstractType<any>} */ (child.parent)._item;
     }
     return false
   };
@@ -2607,7 +2667,7 @@
     if (type._item === null) {
       tname = findRootTypeKey(type);
     } else {
-      typeid = type._item.id;
+      typeid = createID(type._item.id.client, type._item.id.clock);
     }
     return new RelativePosition(typeid, tname, item)
   };
@@ -2727,7 +2787,7 @@
       if (!(right instanceof Item)) {
         return null
       }
-      type = right.parent;
+      type = /** @type {AbstractType<any>} */ (right.parent);
       if (type._item === null || !type._item.deleted) {
         index = right.deleted || !right.countable ? 0 : res.diff;
         let n = right.left;
@@ -2900,13 +2960,13 @@
        * We could shift the array of refs instead, but shift is incredible
        * slow in Chrome for arrays with more than 100k elements
        * @see tryResumePendingStructRefs
-       * @type {Map<number,{i:number,refs:Array<GCRef|ItemRef>}>}
+       * @type {Map<number,{i:number,refs:Array<GC|Item>}>}
        */
       this.pendingClientsStructRefs = new Map();
       /**
        * Stack of pending structs waiting for struct dependencies
        * Maximum length of stack is structReaders.size
-       * @type {Array<GCRef|ItemRef>}
+       * @type {Array<GC|Item>}
        */
       this.pendingStack = [];
       /**
@@ -2993,7 +3053,7 @@
 
   /**
    * Perform a binary search on a sorted array
-   * @param {Array<any>} structs
+   * @param {Array<Item|GC>} structs
    * @param {number} clock
    * @return {number}
    *
@@ -3003,10 +3063,18 @@
   const findIndexSS = (structs, clock) => {
     let left = 0;
     let right = structs.length - 1;
+    let mid = structs[right];
+    let midclock = mid.id.clock;
+    if (midclock === clock) {
+      return right
+    }
+    // @todo does it even make sense to pivot the search?
+    // If a good split misses, it might actually increase the time to find the correct item.
+    // Currently, the only advantage is that search with pivoting might find the item on the first try.
+    let midindex = floor((clock / (midclock + mid.length - 1)) * right); // pivoting the search
     while (left <= right) {
-      const midindex = floor((left + right) / 2);
-      const mid = structs[midindex];
-      const midclock = mid.id.clock;
+      mid = structs[midindex];
+      midclock = mid.id.clock;
       if (midclock <= clock) {
         if (clock < midclock + mid.length) {
           return midindex
@@ -3015,6 +3083,7 @@
       } else {
         right = midindex - 1;
       }
+      midindex = floor((left + right) / 2);
     }
     // Always check state before looking for a struct in StructStore
     // Therefore the case of not finding a struct is unexpected
@@ -3042,16 +3111,10 @@
 
   /**
    * Expects that id is actually in store. This function throws or is an infinite loop otherwise.
-   *
-   * @param {StructStore} store
-   * @param {ID} id
-   * @return {Item}
-   *
    * @private
    * @function
    */
-  // @ts-ignore
-  const getItem = (store, id) => find(store, id);
+  const getItem = /** @type {function(StructStore,ID):Item} */ (find);
 
   /**
    * @param {Transaction} transaction
@@ -3150,348 +3213,201 @@
   };
 
   /**
-   * A transaction is created for every change on the Yjs model. It is possible
-   * to bundle changes on the Yjs model in a single transaction to
-   * minimize the number on messages sent and the number of observer calls.
-   * If possible the user of this library should bundle as many changes as
-   * possible. Here is an example to illustrate the advantages of bundling:
+   * Utility module to work with EcmaScript Symbols.
    *
-   * @example
-   * const map = y.define('map', YMap)
-   * // Log content when change is triggered
-   * map.observe(() => {
-   *   console.log('change triggered')
-   * })
-   * // Each change on the map type triggers a log message:
-   * map.set('a', 0) // => "change triggered"
-   * map.set('b', 0) // => "change triggered"
-   * // When put in a transaction, it will trigger the log after the transaction:
-   * y.transact(() => {
-   *   map.set('a', 1)
-   *   map.set('b', 1)
-   * }) // => "change triggered"
-   *
-   * @public
+   * @module symbol
    */
-  class Transaction {
+
+  /**
+   * Return fresh symbol.
+   *
+   * @return {Symbol}
+   */
+  const create$3 = Symbol;
+
+  /**
+   * Working with value pairs.
+   *
+   * @module pair
+   */
+
+  /**
+   * @template L,R
+   */
+  class Pair {
     /**
-     * @param {Doc} doc
-     * @param {any} origin
-     * @param {boolean} local
+     * @param {L} left
+     * @param {R} right
      */
-    constructor (doc, origin, local) {
-      /**
-       * The Yjs instance.
-       * @type {Doc}
-       */
-      this.doc = doc;
-      /**
-       * Describes the set of deleted items by ids
-       * @type {DeleteSet}
-       */
-      this.deleteSet = new DeleteSet();
-      /**
-       * Holds the state before the transaction started.
-       * @type {Map<Number,Number>}
-       */
-      this.beforeState = getStateVector(doc.store);
-      /**
-       * Holds the state after the transaction.
-       * @type {Map<Number,Number>}
-       */
-      this.afterState = new Map();
-      /**
-       * All types that were directly modified (property added or child
-       * inserted/deleted). New types are not included in this Set.
-       * Maps from type to parentSubs (`item.parentSub = null` for YArray)
-       * @type {Map<AbstractType<YEvent>,Set<String|null>>}
-       */
-      this.changed = new Map();
-      /**
-       * Stores the events for the types that observe also child elements.
-       * It is mainly used by `observeDeep`.
-       * @type {Map<AbstractType<YEvent>,Array<YEvent>>}
-       */
-      this.changedParentTypes = new Map();
-      /**
-       * @type {Set<ID>}
-       */
-      this._mergeStructs = new Set();
-      /**
-       * @type {any}
-       */
-      this.origin = origin;
-      /**
-       * Stores meta information on the transaction
-       * @type {Map<any,any>}
-       */
-      this.meta = new Map();
-      /**
-       * Whether this change originates from this doc.
-       * @type {boolean}
-       */
-      this.local = local;
+    constructor (left, right) {
+      this.left = left;
+      this.right = right;
     }
   }
 
   /**
-   * @param {Transaction} transaction
+   * @template L,R
+   * @param {L} left
+   * @param {R} right
+   * @return {Pair<L,R>}
    */
-  const computeUpdateMessageFromTransaction = transaction => {
-    if (transaction.deleteSet.clients.size === 0 && !any(transaction.afterState, (clock, client) => transaction.beforeState.get(client) !== clock)) {
-      return null
-    }
-    const encoder = createEncoder();
-    sortAndMergeDeleteSet(transaction.deleteSet);
-    writeStructsFromTransaction(encoder, transaction);
-    writeDeleteSet(encoder, transaction.deleteSet);
-    return encoder
+  const create$4 = (left, right) => new Pair(left, right);
+
+  /**
+   * @template L,R
+   * @param {Array<Pair<L,R>>} arr
+   * @param {function(L, R):any} f
+   */
+  const forEach$1 = (arr, f) => arr.forEach(p => f(p.left, p.right));
+
+  /* eslint-env browser */
+
+  /* istanbul ignore next */
+  /**
+   * @type {Document}
+   */
+  const doc = /** @type {Document} */ (typeof document !== 'undefined' ? document : {});
+
+  /**
+   * @param {string} name
+   * @return {HTMLElement}
+   */
+  /* istanbul ignore next */
+  const createElement = name => doc.createElement(name);
+
+  /**
+   * @return {DocumentFragment}
+   */
+  /* istanbul ignore next */
+  const createDocumentFragment = () => doc.createDocumentFragment();
+
+  /**
+   * @param {string} text
+   * @return {Text}
+   */
+  /* istanbul ignore next */
+  const createTextNode = text => doc.createTextNode(text);
+
+  /* istanbul ignore next */
+  const domParser = /** @type {DOMParser} */ (typeof DOMParser !== 'undefined' ? new DOMParser() : null);
+
+  /**
+   * @param {Element} el
+   * @param {Array<pair.Pair<string,string|boolean>>} attrs Array of key-value pairs
+   * @return {Element}
+   */
+  /* istanbul ignore next */
+  const setAttributes = (el, attrs) => {
+    forEach$1(attrs, (key, value) => {
+      if (value === false) {
+        el.removeAttribute(key);
+      } else if (value === true) {
+        el.setAttribute(key, '');
+      } else {
+        // @ts-ignore
+        el.setAttribute(key, value);
+      }
+    });
+    return el
   };
 
   /**
-   * @param {Transaction} transaction
+   * @param {Array<Node>|HTMLCollection} children
+   * @return {DocumentFragment}
+   */
+  /* istanbul ignore next */
+  const fragment = children => {
+    const fragment = createDocumentFragment();
+    for (let i = 0; i < children.length; i++) {
+      fragment.appendChild(children[i]);
+    }
+    return fragment
+  };
+
+  /**
+   * @param {Element} parent
+   * @param {Array<Node>} nodes
+   * @return {Element}
+   */
+  /* istanbul ignore next */
+  const append = (parent, nodes) => {
+    parent.appendChild(fragment(nodes));
+    return parent
+  };
+
+  /**
+   * @param {EventTarget} el
+   * @param {string} name
+   * @param {EventListener} f
+   */
+  /* istanbul ignore next */
+  const addEventListener = (el, name, f) => el.addEventListener(name, f);
+
+  /**
+   * @param {string} name
+   * @param {Array<pair.Pair<string,string>|pair.Pair<string,boolean>>} attrs Array of key-value pairs
+   * @param {Array<Node>} children
+   * @return {Element}
+   */
+  /* istanbul ignore next */
+  const element = (name, attrs = [], children = []) =>
+    append(setAttributes(createElement(name), attrs), children);
+
+  /**
+   * @param {string} t
+   * @return {Text}
+   */
+  /* istanbul ignore next */
+  const text = createTextNode;
+
+  /**
+   * @param {Map<string,string>} m
+   * @return {string}
+   */
+  /* istanbul ignore next */
+  const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
+
+  /**
+   * JSON utility functions.
    *
-   * @private
-   * @function
+   * @module json
    */
-  const nextID = transaction => {
-    const y = transaction.doc;
-    return createID(y.clientID, getState(y.store, y.clientID))
-  };
 
   /**
-   * If `type.parent` was added in current transaction, `type` technically
-   * did not change, it was just added and we should not fire events for `type`.
+   * Transform JavaScript object to JSON.
    *
-   * @param {Transaction} transaction
-   * @param {AbstractType<YEvent>} type
-   * @param {string|null} parentSub
+   * @param {any} object
+   * @return {string}
    */
-  const addChangedTypeToTransaction = (transaction, type, parentSub) => {
-    const item = type._item;
-    if (item === null || (item.id.clock < (transaction.beforeState.get(item.id.client) || 0) && !item.deleted)) {
-      setIfUndefined(transaction.changed, type, create$1).add(parentSub);
-    }
-  };
+  const stringify = JSON.stringify;
+
+  /* global requestIdleCallback, requestAnimationFrame, cancelIdleCallback, cancelAnimationFrame */
 
   /**
-   * @param {Array<AbstractStruct>} structs
-   * @param {number} pos
-   */
-  const tryToMergeWithLeft = (structs, pos) => {
-    const left = structs[pos - 1];
-    const right = structs[pos];
-    if (left.deleted === right.deleted && left.constructor === right.constructor) {
-      if (left.mergeWith(right)) {
-        structs.splice(pos, 1);
-        if (right instanceof Item && right.parentSub !== null && right.parent._map.get(right.parentSub) === right) {
-          right.parent._map.set(right.parentSub, /** @type {Item} */ (left));
-        }
-      }
-    }
-  };
-
-  /**
-   * @param {DeleteSet} ds
-   * @param {StructStore} store
-   * @param {function(Item):boolean} gcFilter
-   */
-  const tryGcDeleteSet = (ds, store, gcFilter) => {
-    for (const [client, deleteItems] of ds.clients) {
-      const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client));
-      for (let di = deleteItems.length - 1; di >= 0; di--) {
-        const deleteItem = deleteItems[di];
-        const endDeleteItemClock = deleteItem.clock + deleteItem.len;
-        for (
-          let si = findIndexSS(structs, deleteItem.clock), struct = structs[si];
-          si < structs.length && struct.id.clock < endDeleteItemClock;
-          struct = structs[++si]
-        ) {
-          const struct = structs[si];
-          if (deleteItem.clock + deleteItem.len <= struct.id.clock) {
-            break
-          }
-          if (struct instanceof Item && struct.deleted && !struct.keep && gcFilter(struct)) {
-            struct.gc(store, false);
-          }
-        }
-      }
-    }
-  };
-
-  /**
-   * @param {DeleteSet} ds
-   * @param {StructStore} store
-   */
-  const tryMergeDeleteSet = (ds, store) => {
-    // try to merge deleted / gc'd items
-    // merge from right to left for better efficiecy and so we don't miss any merge targets
-    for (const [client, deleteItems] of ds.clients) {
-      const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client));
-      for (let di = deleteItems.length - 1; di >= 0; di--) {
-        const deleteItem = deleteItems[di];
-        // start with merging the item next to the last deleted item
-        const mostRightIndexToCheck = min(structs.length - 1, 1 + findIndexSS(structs, deleteItem.clock + deleteItem.len - 1));
-        for (
-          let si = mostRightIndexToCheck, struct = structs[si];
-          si > 0 && struct.id.clock >= deleteItem.clock;
-          struct = structs[--si]
-        ) {
-          tryToMergeWithLeft(structs, si);
-        }
-      }
-    }
-  };
-
-  /**
-   * @param {DeleteSet} ds
-   * @param {StructStore} store
-   * @param {function(Item):boolean} gcFilter
-   */
-  const tryGc = (ds, store, gcFilter) => {
-    tryGcDeleteSet(ds, store, gcFilter);
-    tryMergeDeleteSet(ds, store);
-  };
-
-  /**
-   * @param {Array<Transaction>} transactionCleanups
-   * @param {number} i
-   */
-  const cleanupTransactions = (transactionCleanups, i) => {
-    if (i < transactionCleanups.length) {
-      const transaction = transactionCleanups[i];
-      const doc = transaction.doc;
-      const store = doc.store;
-      const ds = transaction.deleteSet;
-      try {
-        sortAndMergeDeleteSet(ds);
-        transaction.afterState = getStateVector(transaction.doc.store);
-        doc._transaction = null;
-        doc.emit('beforeObserverCalls', [transaction, doc]);
-        /**
-         * An array of event callbacks.
-         *
-         * Each callback is called even if the other ones throw errors.
-         *
-         * @type {Array<function():void>}
-         */
-        const fs = [];
-        // observe events on changed types
-        transaction.changed.forEach((subs, itemtype) =>
-          fs.push(() => {
-            if (itemtype._item === null || !itemtype._item.deleted) {
-              itemtype._callObserver(transaction, subs);
-            }
-          })
-        );
-        fs.push(() => {
-          // deep observe events
-          transaction.changedParentTypes.forEach((events, type) =>
-            fs.push(() => {
-              // We need to think about the possibility that the user transforms the
-              // Y.Doc in the event.
-              if (type._item === null || !type._item.deleted) {
-                events = events
-                  .filter(event =>
-                    event.target._item === null || !event.target._item.deleted
-                  );
-                events
-                  .forEach(event => {
-                    event.currentTarget = type;
-                  });
-                // We don't need to check for events.length
-                // because we know it has at least one element
-                callEventHandlerListeners(type._dEH, events, transaction);
-              }
-            })
-          );
-          fs.push(() => doc.emit('afterTransaction', [transaction, doc]));
-        });
-        callAll(fs, []);
-      } finally {
-        // Replace deleted items with ItemDeleted / GC.
-        // This is where content is actually remove from the Yjs Doc.
-        if (doc.gc) {
-          tryGcDeleteSet(ds, store, doc.gcFilter);
-        }
-        tryMergeDeleteSet(ds, store);
-
-        // on all affected store.clients props, try to merge
-        for (const [client, clock] of transaction.afterState) {
-          const beforeClock = transaction.beforeState.get(client) || 0;
-          if (beforeClock !== clock) {
-            const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client));
-            // we iterate from right to left so we can safely remove entries
-            const firstChangePos = max(findIndexSS(structs, beforeClock), 1);
-            for (let i = structs.length - 1; i >= firstChangePos; i--) {
-              tryToMergeWithLeft(structs, i);
-            }
-          }
-        }
-        // try to merge mergeStructs
-        // @todo: it makes more sense to transform mergeStructs to a DS, sort it, and merge from right to left
-        //        but at the moment DS does not handle duplicates
-        for (const mid of transaction._mergeStructs) {
-          const client = mid.client;
-          const clock = mid.clock;
-          const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client));
-          const replacedStructPos = findIndexSS(structs, clock);
-          if (replacedStructPos + 1 < structs.length) {
-            tryToMergeWithLeft(structs, replacedStructPos + 1);
-          }
-          if (replacedStructPos > 0) {
-            tryToMergeWithLeft(structs, replacedStructPos);
-          }
-        }
-        // @todo Merge all the transactions into one and provide send the data as a single update message
-        doc.emit('afterTransactionCleanup', [transaction, doc]);
-        if (doc._observers.has('update')) {
-          const updateMessage = computeUpdateMessageFromTransaction(transaction);
-          if (updateMessage !== null) {
-            doc.emit('update', [toUint8Array(updateMessage), transaction.origin, doc]);
-          }
-        }
-        if (transactionCleanups.length <= i + 1) {
-          doc._transactionCleanups = [];
-        } else {
-          cleanupTransactions(transactionCleanups, i + 1);
-        }
-      }
-    }
-  };
-
-  /**
-   * Implements the functionality of `y.transact(()=>{..})`
+   * Utility module to work with EcmaScript's event loop.
    *
-   * @param {Doc} doc
-   * @param {function(Transaction):void} f
-   * @param {any} [origin=true]
-   *
-   * @function
+   * @module eventloop
    */
-  const transact = (doc, f, origin = null, local = true) => {
-    const transactionCleanups = doc._transactionCleanups;
-    let initialCall = false;
-    if (doc._transaction === null) {
-      initialCall = true;
-      doc._transaction = new Transaction(doc, origin, local);
-      transactionCleanups.push(doc._transaction);
-      doc.emit('beforeTransaction', [doc._transaction, doc]);
+
+  /**
+   * @type {Array<function>}
+   */
+  let queue = [];
+
+  const _runQueue = () => {
+    for (let i = 0; i < queue.length; i++) {
+      queue[i]();
     }
-    try {
-      f(doc._transaction);
-    } finally {
-      if (initialCall && transactionCleanups[0] === doc._transaction) {
-        // The first transaction ended, now process observer calls.
-        // Observer call may create new transactions for which we need to call the observers and do cleanup.
-        // We don't want to nest these calls, so we execute these calls one after
-        // another.
-        // Also we need to ensure that all cleanups are called, even if the
-        // observes throw errors.
-        // This file is full of hacky try {} finally {} blocks to ensure that an
-        // event can throw errors and also that the cleanup is called.
-        cleanupTransactions(transactionCleanups, 0);
-      }
+    queue = [];
+  };
+
+  /**
+   * @param {function():void} f
+   */
+  const enqueue = f => {
+    queue.push(f);
+    if (queue.length === 1) {
+      setTimeout(_runQueue, 0);
     }
   };
 
@@ -3568,16 +3484,716 @@
     return minutes + 'min' + (seconds > 0 ? ' ' + seconds + 's' : '')
   };
 
+  /**
+   * Isomorphic logging module with support for colors!
+   *
+   * @module logging
+   */
+
+  const BOLD = create$3();
+  const UNBOLD = create$3();
+  const BLUE = create$3();
+  const GREY = create$3();
+  const GREEN = create$3();
+  const RED = create$3();
+  const PURPLE = create$3();
+  const ORANGE = create$3();
+  const UNCOLOR = create$3();
+
+  /**
+   * @type {Object<Symbol,pair.Pair<string,string>>}
+   */
+  const _browserStyleMap = {
+    [BOLD]: create$4('font-weight', 'bold'),
+    [UNBOLD]: create$4('font-weight', 'normal'),
+    [BLUE]: create$4('color', 'blue'),
+    [GREEN]: create$4('color', 'green'),
+    [GREY]: create$4('color', 'grey'),
+    [RED]: create$4('color', 'red'),
+    [PURPLE]: create$4('color', 'purple'),
+    [ORANGE]: create$4('color', 'orange'), // not well supported in chrome when debugging node with inspector - TODO: deprecate
+    [UNCOLOR]: create$4('color', 'black')
+  };
+
+  const _nodeStyleMap = {
+    [BOLD]: '\u001b[1m',
+    [UNBOLD]: '\u001b[2m',
+    [BLUE]: '\x1b[34m',
+    [GREEN]: '\x1b[32m',
+    [GREY]: '\u001b[37m',
+    [RED]: '\x1b[31m',
+    [PURPLE]: '\x1b[35m',
+    [ORANGE]: '\x1b[38;5;208m',
+    [UNCOLOR]: '\x1b[0m'
+  };
+
+  /* istanbul ignore next */
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   * @return {Array<string|object|number>}
+   */
+  const computeBrowserLoggingArgs = args => {
+    const strBuilder = [];
+    const styles = [];
+    const currentStyle = create();
+    /**
+     * @type {Array<string|Object|number>}
+     */
+    let logArgs = [];
+    // try with formatting until we find something unsupported
+    let i = 0;
+
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      // @ts-ignore
+      const style = _browserStyleMap[arg];
+      if (style !== undefined) {
+        currentStyle.set(style.left, style.right);
+      } else {
+        if (arg.constructor === String || arg.constructor === Number) {
+          const style = mapToStyleString(currentStyle);
+          if (i > 0 || style.length > 0) {
+            strBuilder.push('%c' + arg);
+            styles.push(style);
+          } else {
+            strBuilder.push(arg);
+          }
+        } else {
+          break
+        }
+      }
+    }
+
+    if (i > 0) {
+      // create logArgs with what we have so far
+      logArgs = styles;
+      logArgs.unshift(strBuilder.join(''));
+    }
+    // append the rest
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      if (!(arg instanceof Symbol)) {
+        logArgs.push(arg);
+      }
+    }
+    return logArgs
+  };
+
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   * @return {Array<string|object|number>}
+   */
+  const computeNodeLoggingArgs = args => {
+    const strBuilder = [];
+    const logArgs = [];
+
+    // try with formatting until we find something unsupported
+    let i = 0;
+
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      // @ts-ignore
+      const style = _nodeStyleMap[arg];
+      if (style !== undefined) {
+        strBuilder.push(style);
+      } else {
+        if (arg.constructor === String || arg.constructor === Number) {
+          strBuilder.push(arg);
+        } else {
+          break
+        }
+      }
+    }
+    if (i > 0) {
+      // create logArgs with what we have so far
+      strBuilder.push('\x1b[0m');
+      logArgs.push(strBuilder.join(''));
+    }
+    // append the rest
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      /* istanbul ignore else */
+      if (!(arg instanceof Symbol)) {
+        logArgs.push(arg);
+      }
+    }
+    return logArgs
+  };
+
+  /* istanbul ignore next */
+  const computeLoggingArgs = isNode ? computeNodeLoggingArgs : computeBrowserLoggingArgs;
+
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   */
+  const print = (...args) => {
+    console.log(...computeLoggingArgs(args));
+    /* istanbul ignore next */
+    vconsoles.forEach(vc => vc.print(args));
+  };
+
+  /* istanbul ignore next */
+  /**
+   * @param {Error} err
+   */
+  const printError = err => {
+    console.error(err);
+    vconsoles.forEach(vc => vc.printError(err));
+  };
+
+  /* istanbul ignore next */
+  /**
+   * @param {string} url image location
+   * @param {number} height height of the image in pixel
+   */
+  const printImg = (url, height) => {
+    if (isBrowser) {
+      console.log('%c                      ', `font-size: ${height}px; background-size: contain; background-repeat: no-repeat; background-image: url(${url})`);
+      // console.log('%c                ', `font-size: ${height}x; background: url(${url}) no-repeat;`)
+    }
+    vconsoles.forEach(vc => vc.printImg(url, height));
+  };
+
+  /* istanbul ignore next */
+  /**
+   * @param {string} base64
+   * @param {number} height
+   */
+  const printImgBase64 = (base64, height) => printImg(`data:image/gif;base64,${base64}`, height);
+
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   */
+  const group = (...args) => {
+    console.group(...computeLoggingArgs(args));
+    /* istanbul ignore next */
+    vconsoles.forEach(vc => vc.group(args));
+  };
+
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   */
+  const groupCollapsed = (...args) => {
+    console.groupCollapsed(...computeLoggingArgs(args));
+    /* istanbul ignore next */
+    vconsoles.forEach(vc => vc.groupCollapsed(args));
+  };
+
+  const groupEnd = () => {
+    console.groupEnd();
+    /* istanbul ignore next */
+    vconsoles.forEach(vc => vc.groupEnd());
+  };
+
+  const vconsoles = new Set();
+
+  /* istanbul ignore next */
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   * @return {Array<Element>}
+   */
+  const _computeLineSpans = args => {
+    const spans = [];
+    const currentStyle = new Map();
+    // try with formatting until we find something unsupported
+    let i = 0;
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      // @ts-ignore
+      const style = _browserStyleMap[arg];
+      if (style !== undefined) {
+        currentStyle.set(style.left, style.right);
+      } else {
+        if (arg.constructor === String || arg.constructor === Number) {
+          // @ts-ignore
+          const span = element('span', [create$4('style', mapToStyleString(currentStyle))], [text(arg)]);
+          if (span.innerHTML === '') {
+            span.innerHTML = '&nbsp;';
+          }
+          spans.push(span);
+        } else {
+          break
+        }
+      }
+    }
+    // append the rest
+    for (; i < args.length; i++) {
+      let content = args[i];
+      if (!(content instanceof Symbol)) {
+        if (content.constructor !== String && content.constructor !== Number) {
+          content = ' ' + stringify(content) + ' ';
+        }
+        spans.push(element('span', [], [text(/** @type {string} */ (content))]));
+      }
+    }
+    return spans
+  };
+
+  const lineStyle = 'font-family:monospace;border-bottom:1px solid #e2e2e2;padding:2px;';
+
+  /* istanbul ignore next */
+  class VConsole {
+    /**
+     * @param {Element} dom
+     */
+    constructor (dom) {
+      this.dom = dom;
+      /**
+       * @type {Element}
+       */
+      this.ccontainer = this.dom;
+      this.depth = 0;
+      vconsoles.add(this);
+    }
+
+    /**
+     * @param {Array<string|Symbol|Object|number>} args
+     * @param {boolean} collapsed
+     */
+    group (args, collapsed = false) {
+      enqueue(() => {
+        const triangleDown = element('span', [create$4('hidden', collapsed), create$4('style', 'color:grey;font-size:120%;')], [text('▼')]);
+        const triangleRight = element('span', [create$4('hidden', !collapsed), create$4('style', 'color:grey;font-size:125%;')], [text('▶')]);
+        const content = element('div', [create$4('style', `${lineStyle};padding-left:${this.depth * 10}px`)], [triangleDown, triangleRight, text(' ')].concat(_computeLineSpans(args)));
+        const nextContainer = element('div', [create$4('hidden', collapsed)]);
+        const nextLine = element('div', [], [content, nextContainer]);
+        append(this.ccontainer, [nextLine]);
+        this.ccontainer = nextContainer;
+        this.depth++;
+        // when header is clicked, collapse/uncollapse container
+        addEventListener(content, 'click', event => {
+          nextContainer.toggleAttribute('hidden');
+          triangleDown.toggleAttribute('hidden');
+          triangleRight.toggleAttribute('hidden');
+        });
+      });
+    }
+
+    /**
+     * @param {Array<string|Symbol|Object|number>} args
+     */
+    groupCollapsed (args) {
+      this.group(args, true);
+    }
+
+    groupEnd () {
+      enqueue(() => {
+        if (this.depth > 0) {
+          this.depth--;
+          // @ts-ignore
+          this.ccontainer = this.ccontainer.parentElement.parentElement;
+        }
+      });
+    }
+
+    /**
+     * @param {Array<string|Symbol|Object|number>} args
+     */
+    print (args) {
+      enqueue(() => {
+        append(this.ccontainer, [element('div', [create$4('style', `${lineStyle};padding-left:${this.depth * 10}px`)], _computeLineSpans(args))]);
+      });
+    }
+
+    /**
+     * @param {Error} err
+     */
+    printError (err) {
+      this.print([RED, BOLD, err.toString()]);
+    }
+
+    /**
+     * @param {string} url
+     * @param {number} height
+     */
+    printImg (url, height) {
+      enqueue(() => {
+        append(this.ccontainer, [element('img', [create$4('src', url), create$4('height', `${round(height * 1.5)}px`)])]);
+      });
+    }
+
+    /**
+     * @param {Node} node
+     */
+    printDom (node) {
+      enqueue(() => {
+        append(this.ccontainer, [node]);
+      });
+    }
+
+    destroy () {
+      enqueue(() => {
+        vconsoles.delete(this);
+      });
+    }
+  }
+
+  /* istanbul ignore next */
+  /**
+   * @param {Element} dom
+   */
+  const createVConsole = dom => new VConsole(dom);
+
+  /**
+   * A transaction is created for every change on the Yjs model. It is possible
+   * to bundle changes on the Yjs model in a single transaction to
+   * minimize the number on messages sent and the number of observer calls.
+   * If possible the user of this library should bundle as many changes as
+   * possible. Here is an example to illustrate the advantages of bundling:
+   *
+   * @example
+   * const map = y.define('map', YMap)
+   * // Log content when change is triggered
+   * map.observe(() => {
+   *   console.log('change triggered')
+   * })
+   * // Each change on the map type triggers a log message:
+   * map.set('a', 0) // => "change triggered"
+   * map.set('b', 0) // => "change triggered"
+   * // When put in a transaction, it will trigger the log after the transaction:
+   * y.transact(() => {
+   *   map.set('a', 1)
+   *   map.set('b', 1)
+   * }) // => "change triggered"
+   *
+   * @public
+   */
+  class Transaction {
+    /**
+     * @param {Doc} doc
+     * @param {any} origin
+     * @param {boolean} local
+     */
+    constructor (doc, origin, local) {
+      /**
+       * The Yjs instance.
+       * @type {Doc}
+       */
+      this.doc = doc;
+      /**
+       * Describes the set of deleted items by ids
+       * @type {DeleteSet}
+       */
+      this.deleteSet = new DeleteSet();
+      /**
+       * Holds the state before the transaction started.
+       * @type {Map<Number,Number>}
+       */
+      this.beforeState = getStateVector(doc.store);
+      /**
+       * Holds the state after the transaction.
+       * @type {Map<Number,Number>}
+       */
+      this.afterState = new Map();
+      /**
+       * All types that were directly modified (property added or child
+       * inserted/deleted). New types are not included in this Set.
+       * Maps from type to parentSubs (`item.parentSub = null` for YArray)
+       * @type {Map<AbstractType<YEvent>,Set<String|null>>}
+       */
+      this.changed = new Map();
+      /**
+       * Stores the events for the types that observe also child elements.
+       * It is mainly used by `observeDeep`.
+       * @type {Map<AbstractType<YEvent>,Array<YEvent>>}
+       */
+      this.changedParentTypes = new Map();
+      /**
+       * @type {Array<AbstractStruct>}
+       */
+      this._mergeStructs = [];
+      /**
+       * @type {any}
+       */
+      this.origin = origin;
+      /**
+       * Stores meta information on the transaction
+       * @type {Map<any,any>}
+       */
+      this.meta = new Map();
+      /**
+       * Whether this change originates from this doc.
+       * @type {boolean}
+       */
+      this.local = local;
+    }
+  }
+
+  /**
+   * @param {Transaction} transaction
+   */
+  const computeUpdateMessageFromTransaction = transaction => {
+    if (transaction.deleteSet.clients.size === 0 && !any(transaction.afterState, (clock, client) => transaction.beforeState.get(client) !== clock)) {
+      return null
+    }
+    const encoder = createEncoder();
+    sortAndMergeDeleteSet(transaction.deleteSet);
+    writeStructsFromTransaction(encoder, transaction);
+    writeDeleteSet(encoder, transaction.deleteSet);
+    return encoder
+  };
+
+  /**
+   * @param {Transaction} transaction
+   *
+   * @private
+   * @function
+   */
+  const nextID = transaction => {
+    const y = transaction.doc;
+    return createID(y.clientID, getState(y.store, y.clientID))
+  };
+
+  /**
+   * If `type.parent` was added in current transaction, `type` technically
+   * did not change, it was just added and we should not fire events for `type`.
+   *
+   * @param {Transaction} transaction
+   * @param {AbstractType<YEvent>} type
+   * @param {string|null} parentSub
+   */
+  const addChangedTypeToTransaction = (transaction, type, parentSub) => {
+    const item = type._item;
+    if (item === null || (item.id.clock < (transaction.beforeState.get(item.id.client) || 0) && !item.deleted)) {
+      setIfUndefined(transaction.changed, type, create$1).add(parentSub);
+    }
+  };
+
+  /**
+   * @param {Array<AbstractStruct>} structs
+   * @param {number} pos
+   */
+  const tryToMergeWithLeft = (structs, pos) => {
+    const left = structs[pos - 1];
+    const right = structs[pos];
+    if (left.deleted === right.deleted && left.constructor === right.constructor) {
+      if (left.mergeWith(right)) {
+        structs.splice(pos, 1);
+        if (right instanceof Item && right.parentSub !== null && /** @type {AbstractType<any>} */ (right.parent)._map.get(right.parentSub) === right) {
+          /** @type {AbstractType<any>} */ (right.parent)._map.set(right.parentSub, /** @type {Item} */ (left));
+        }
+      }
+    }
+  };
+
+  /**
+   * @param {DeleteSet} ds
+   * @param {StructStore} store
+   * @param {function(Item):boolean} gcFilter
+   */
+  const tryGcDeleteSet = (ds, store, gcFilter) => {
+    for (const [client, deleteItems] of ds.clients) {
+      const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
+      for (let di = deleteItems.length - 1; di >= 0; di--) {
+        const deleteItem = deleteItems[di];
+        const endDeleteItemClock = deleteItem.clock + deleteItem.len;
+        for (
+          let si = findIndexSS(structs, deleteItem.clock), struct = structs[si];
+          si < structs.length && struct.id.clock < endDeleteItemClock;
+          struct = structs[++si]
+        ) {
+          const struct = structs[si];
+          if (deleteItem.clock + deleteItem.len <= struct.id.clock) {
+            break
+          }
+          if (struct instanceof Item && struct.deleted && !struct.keep && gcFilter(struct)) {
+            struct.gc(store, false);
+          }
+        }
+      }
+    }
+  };
+
+  /**
+   * @param {DeleteSet} ds
+   * @param {StructStore} store
+   */
+  const tryMergeDeleteSet = (ds, store) => {
+    // try to merge deleted / gc'd items
+    // merge from right to left for better efficiecy and so we don't miss any merge targets
+    for (const [client, deleteItems] of ds.clients) {
+      const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
+      for (let di = deleteItems.length - 1; di >= 0; di--) {
+        const deleteItem = deleteItems[di];
+        // start with merging the item next to the last deleted item
+        const mostRightIndexToCheck = min(structs.length - 1, 1 + findIndexSS(structs, deleteItem.clock + deleteItem.len - 1));
+        for (
+          let si = mostRightIndexToCheck, struct = structs[si];
+          si > 0 && struct.id.clock >= deleteItem.clock;
+          struct = structs[--si]
+        ) {
+          tryToMergeWithLeft(structs, si);
+        }
+      }
+    }
+  };
+
+  /**
+   * @param {DeleteSet} ds
+   * @param {StructStore} store
+   * @param {function(Item):boolean} gcFilter
+   */
+  const tryGc = (ds, store, gcFilter) => {
+    tryGcDeleteSet(ds, store, gcFilter);
+    tryMergeDeleteSet(ds, store);
+  };
+
+  /**
+   * @param {Array<Transaction>} transactionCleanups
+   * @param {number} i
+   */
+  const cleanupTransactions = (transactionCleanups, i) => {
+    if (i < transactionCleanups.length) {
+      const transaction = transactionCleanups[i];
+      const doc = transaction.doc;
+      const store = doc.store;
+      const ds = transaction.deleteSet;
+      const mergeStructs = transaction._mergeStructs;
+      try {
+        sortAndMergeDeleteSet(ds);
+        transaction.afterState = getStateVector(transaction.doc.store);
+        doc._transaction = null;
+        doc.emit('beforeObserverCalls', [transaction, doc]);
+        /**
+         * An array of event callbacks.
+         *
+         * Each callback is called even if the other ones throw errors.
+         *
+         * @type {Array<function():void>}
+         */
+        const fs = [];
+        // observe events on changed types
+        transaction.changed.forEach((subs, itemtype) =>
+          fs.push(() => {
+            if (itemtype._item === null || !itemtype._item.deleted) {
+              itemtype._callObserver(transaction, subs);
+            }
+          })
+        );
+        fs.push(() => {
+          // deep observe events
+          transaction.changedParentTypes.forEach((events, type) =>
+            fs.push(() => {
+              // We need to think about the possibility that the user transforms the
+              // Y.Doc in the event.
+              if (type._item === null || !type._item.deleted) {
+                events = events
+                  .filter(event =>
+                    event.target._item === null || !event.target._item.deleted
+                  );
+                events
+                  .forEach(event => {
+                    event.currentTarget = type;
+                  });
+                // We don't need to check for events.length
+                // because we know it has at least one element
+                callEventHandlerListeners(type._dEH, events, transaction);
+              }
+            })
+          );
+          fs.push(() => doc.emit('afterTransaction', [transaction, doc]));
+        });
+        callAll(fs, []);
+      } finally {
+        // Replace deleted items with ItemDeleted / GC.
+        // This is where content is actually remove from the Yjs Doc.
+        if (doc.gc) {
+          tryGcDeleteSet(ds, store, doc.gcFilter);
+        }
+        tryMergeDeleteSet(ds, store);
+
+        // on all affected store.clients props, try to merge
+        for (const [client, clock] of transaction.afterState) {
+          const beforeClock = transaction.beforeState.get(client) || 0;
+          if (beforeClock !== clock) {
+            const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
+            // we iterate from right to left so we can safely remove entries
+            const firstChangePos = max(findIndexSS(structs, beforeClock), 1);
+            for (let i = structs.length - 1; i >= firstChangePos; i--) {
+              tryToMergeWithLeft(structs, i);
+            }
+          }
+        }
+        // try to merge mergeStructs
+        // @todo: it makes more sense to transform mergeStructs to a DS, sort it, and merge from right to left
+        //        but at the moment DS does not handle duplicates
+        for (let i = 0; i < mergeStructs.length; i++) {
+          const { client, clock } = mergeStructs[i].id;
+          const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
+          const replacedStructPos = findIndexSS(structs, clock);
+          if (replacedStructPos + 1 < structs.length) {
+            tryToMergeWithLeft(structs, replacedStructPos + 1);
+          }
+          if (replacedStructPos > 0) {
+            tryToMergeWithLeft(structs, replacedStructPos);
+          }
+        }
+        if (!transaction.local && transaction.afterState.get(doc.clientID) !== transaction.beforeState.get(doc.clientID)) {
+          doc.clientID = generateNewClientId();
+          print(ORANGE, BOLD, '[yjs] ', UNBOLD, RED, 'Changed the client-id because another client seems to be using it.');
+        }
+        // @todo Merge all the transactions into one and provide send the data as a single update message
+        doc.emit('afterTransactionCleanup', [transaction, doc]);
+        if (doc._observers.has('update')) {
+          const updateMessage = computeUpdateMessageFromTransaction(transaction);
+          if (updateMessage !== null) {
+            doc.emit('update', [toUint8Array(updateMessage), transaction.origin, doc]);
+          }
+        }
+        if (transactionCleanups.length <= i + 1) {
+          doc._transactionCleanups = [];
+        } else {
+          cleanupTransactions(transactionCleanups, i + 1);
+        }
+      }
+    }
+  };
+
+  /**
+   * Implements the functionality of `y.transact(()=>{..})`
+   *
+   * @param {Doc} doc
+   * @param {function(Transaction):void} f
+   * @param {any} [origin=true]
+   *
+   * @function
+   */
+  const transact = (doc, f, origin = null, local = true) => {
+    const transactionCleanups = doc._transactionCleanups;
+    let initialCall = false;
+    if (doc._transaction === null) {
+      initialCall = true;
+      doc._transaction = new Transaction(doc, origin, local);
+      transactionCleanups.push(doc._transaction);
+      doc.emit('beforeTransaction', [doc._transaction, doc]);
+    }
+    try {
+      f(doc._transaction);
+    } finally {
+      if (initialCall && transactionCleanups[0] === doc._transaction) {
+        // The first transaction ended, now process observer calls.
+        // Observer call may create new transactions for which we need to call the observers and do cleanup.
+        // We don't want to nest these calls, so we execute these calls one after
+        // another.
+        // Also we need to ensure that all cleanups are called, even if the
+        // observes throw errors.
+        // This file is full of hacky try {} finally {} blocks to ensure that an
+        // event can throw errors and also that the cleanup is called.
+        cleanupTransactions(transactionCleanups, 0);
+      }
+    }
+  };
+
   class StackItem {
     /**
      * @param {DeleteSet} ds
-     * @param {number} start clock start of the local client
-     * @param {number} len
+     * @param {Map<number,number>} beforeState
+     * @param {Map<number,number>} afterState
      */
-    constructor (ds, start, len) {
+    constructor (ds, beforeState, afterState) {
       this.ds = ds;
-      this.start = start;
-      this.len = len;
+      this.beforeState = beforeState;
+      this.afterState = afterState;
       /**
        * Use this to save and restore metadata like selection range
        */
@@ -3602,54 +4218,64 @@
     transact(doc, transaction => {
       while (stack.length > 0 && result === null) {
         const store = doc.store;
-        const clientID = doc.clientID;
         const stackItem = /** @type {StackItem} */ (stack.pop());
-        const stackStartClock = stackItem.start;
-        const stackEndClock = stackItem.start + stackItem.len;
+        /**
+         * @type {Set<Item>}
+         */
         const itemsToRedo = new Set();
-        // @todo iterateStructs should not need the structs parameter
-        const structs = /** @type {Array<GC|Item>} */ (store.clients.get(clientID));
+        /**
+         * @type {Array<Item>}
+         */
+        const itemsToDelete = [];
         let performedChange = false;
-        if (stackStartClock !== stackEndClock) {
-          // make sure structs don't overlap with the range of created operations [stackItem.start, stackItem.start + stackItem.end)
-          getItemCleanStart(transaction, createID(clientID, stackStartClock));
-          if (stackEndClock < getState(doc.store, clientID)) {
-            getItemCleanStart(transaction, createID(clientID, stackEndClock));
+        stackItem.afterState.forEach((endClock, client) => {
+          const startClock = stackItem.beforeState.get(client) || 0;
+          const len = endClock - startClock;
+          // @todo iterateStructs should not need the structs parameter
+          const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
+          if (startClock !== endClock) {
+            // make sure structs don't overlap with the range of created operations [stackItem.start, stackItem.start + stackItem.end)
+            // this must be executed before deleted structs are iterated.
+            getItemCleanStart(transaction, createID(client, startClock));
+            if (endClock < getState(doc.store, client)) {
+              getItemCleanStart(transaction, createID(client, endClock));
+            }
+            iterateStructs(transaction, structs, startClock, len, struct => {
+              if (struct instanceof Item) {
+                if (struct.redone !== null) {
+                  let { item, diff } = followRedone(store, struct.id);
+                  if (diff > 0) {
+                    item = getItemCleanStart(transaction, createID(item.id.client, item.id.clock + diff));
+                  }
+                  if (item.length > len) {
+                    getItemCleanStart(transaction, createID(item.id.client, endClock));
+                  }
+                  struct = item;
+                }
+                if (!struct.deleted && scope.some(type => isParentOf(type, /** @type {Item} */ (struct)))) {
+                  itemsToDelete.push(struct);
+                }
+              }
+            });
           }
-        }
+        });
         iterateDeletedStructs(transaction, stackItem.ds, struct => {
+          const id = struct.id;
+          const clock = id.clock;
+          const client = id.client;
+          const startClock = stackItem.beforeState.get(client) || 0;
+          const endClock = stackItem.afterState.get(client) || 0;
           if (
             struct instanceof Item &&
             scope.some(type => isParentOf(type, struct)) &&
             // Never redo structs in [stackItem.start, stackItem.start + stackItem.end) because they were created and deleted in the same capture interval.
-            !(struct.id.client === clientID && struct.id.clock >= stackStartClock && struct.id.clock < stackEndClock)
+            !(clock >= startClock && clock < endClock)
           ) {
             itemsToRedo.add(struct);
           }
         });
         itemsToRedo.forEach(struct => {
           performedChange = redoItem(transaction, struct, itemsToRedo) !== null || performedChange;
-        });
-        /**
-         * @type {Array<Item>}
-         */
-        const itemsToDelete = [];
-        iterateStructs(transaction, structs, stackStartClock, stackItem.len, struct => {
-          if (struct instanceof Item) {
-            if (struct.redone !== null) {
-              let { item, diff } = followRedone(store, struct.id);
-              if (diff > 0) {
-                item = getItemCleanStart(transaction, createID(item.id.client, item.id.clock + diff));
-              }
-              if (item.length > stackItem.len) {
-                getItemCleanStart(transaction, createID(item.id.client, stackEndClock));
-              }
-              struct = item;
-            }
-            if (!struct.deleted && scope.some(type => isParentOf(type, /** @type {Item} */ (struct)))) {
-              itemsToDelete.push(struct);
-            }
-          }
         });
         // We want to delete in reverse order so that children are deleted before
         // parents, so we have more information available when items are filtered.
@@ -3733,17 +4359,17 @@
           // neither undoing nor redoing: delete redoStack
           this.redoStack = [];
         }
-        const beforeState = transaction.beforeState.get(this.doc.clientID) || 0;
-        const afterState = transaction.afterState.get(this.doc.clientID) || 0;
+        const beforeState = transaction.beforeState;
+        const afterState = transaction.afterState;
         const now = getUnixTime();
         if (now - this.lastChange < captureTimeout && stack.length > 0 && !undoing && !redoing) {
           // append change to last stack op
           const lastOp = stack[stack.length - 1];
           lastOp.ds = mergeDeleteSets([lastOp.ds, transaction.deleteSet]);
-          lastOp.len = afterState - lastOp.start;
+          lastOp.afterState = afterState;
         } else {
           // create a new stack op
-          stack.push(new StackItem(transaction.deleteSet, beforeState, afterState - beforeState));
+          stack.push(new StackItem(transaction.deleteSet, beforeState, afterState));
         }
         if (!undoing && !redoing) {
           this.lastChange = now;
@@ -4038,7 +4664,7 @@
       } else {
         // parent is array-ish
         let i = 0;
-        let c = child._item.parent._start;
+        let c = /** @type {AbstractType<any>} */ (child._item.parent)._start;
         while (c !== child._item && c !== null) {
           if (!c.deleted) {
             i++;
@@ -4047,7 +4673,7 @@
         }
         path.unshift(i);
       }
-      child = child._item.parent;
+      child = /** @type {AbstractType<any>} */ (child._item.parent);
     }
     return path
   };
@@ -4098,6 +4724,22 @@
   });
 
   /**
+   * Accumulate all (list) children of a type and return them as an Array.
+   *
+   * @param {AbstractType<any>} t
+   * @return {Array<Item>}
+   */
+  const getTypeChildren = t => {
+    let s = t._start;
+    const arr = [];
+    while (s) {
+      arr.push(s);
+      s = s.right;
+    }
+    return arr
+  };
+
+  /**
    * Call event listeners with an event. This will also add an event to all
    * parents (for `.observeDeep` handlers).
    *
@@ -4115,7 +4757,7 @@
       if (type._item === null) {
         break
       }
-      type = type._item.parent;
+      type = /** @type {AbstractType<any>} */ (type._item.parent);
     }
     callEventHandlerListeners(changedType._eH, event, transaction);
   };
@@ -4437,6 +5079,9 @@
    */
   const typeListInsertGenericsAfter = (transaction, parent, referenceItem, content) => {
     let left = referenceItem;
+    const doc = transaction.doc;
+    const ownClientId = doc.clientID;
+    const store = doc.store;
     const right = referenceItem === null ? parent._start : referenceItem.right;
     /**
      * @type {Array<Object|Array<any>|number>}
@@ -4444,8 +5089,8 @@
     let jsonContent = [];
     const packJsonContent = () => {
       if (jsonContent.length > 0) {
-        left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentJSON(jsonContent));
-        left.integrate(transaction);
+        left = new Item(createID(ownClientId, getState(store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentAny(jsonContent));
+        left.integrate(transaction, 0);
         jsonContent = [];
       }
     };
@@ -4463,13 +5108,13 @@
           switch (c.constructor) {
             case Uint8Array:
             case ArrayBuffer:
-              left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentBinary(new Uint8Array(/** @type {Uint8Array} */ (c))));
-              left.integrate(transaction);
+              left = new Item(createID(ownClientId, getState(store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentBinary(new Uint8Array(/** @type {Uint8Array} */ (c))));
+              left.integrate(transaction, 0);
               break
             default:
               if (c instanceof AbstractType) {
-                left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentType(c));
-                left.integrate(transaction);
+                left = new Item(createID(ownClientId, getState(store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentType(c));
+                left.integrate(transaction, 0);
               } else {
                 throw new Error('Unexpected content type in insert operation')
               }
@@ -4571,6 +5216,8 @@
    */
   const typeMapSet = (transaction, parent, key, value) => {
     const left = parent._map.get(key) || null;
+    const doc = transaction.doc;
+    const ownClientId = doc.clientID;
     let content;
     if (value == null) {
       content = new ContentJSON([value]);
@@ -4594,7 +5241,7 @@
           }
       }
     }
-    new Item(nextID(transaction), left, left === null ? null : left.lastId, null, null, parent, key, content).integrate(transaction);
+    new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, null, null, parent, key, content).integrate(transaction, 0);
   };
 
   /**
@@ -4692,7 +5339,7 @@
    * A shared Array implementation.
    * @template T
    * @extends AbstractType<YArrayEvent<T>>
-   * @implements {IterableIterator<T>}
+   * @implements {Iterable<T>}
    */
   class YArray extends AbstractType {
     constructor () {
@@ -4771,6 +5418,15 @@
      */
     push (content) {
       this.insert(this.length, content);
+    }
+
+    /**
+     * Preppends content to this YArray.
+     *
+     * @param {Array<T>} content Array of content to preppend.
+     */
+    unshift (content) {
+      this.insert(0, content);
     }
 
     /**
@@ -4883,16 +5539,26 @@
    * A shared Map implementation.
    *
    * @extends AbstractType<YMapEvent<T>>
-   * @implements {IterableIterator}
+   * @implements {Iterable<T>}
    */
   class YMap extends AbstractType {
-    constructor () {
+    /**
+     *
+     * @param {Iterable<readonly [string, any]>=} entries - an optional iterable to initialize the YMap
+     */
+    constructor (entries) {
       super();
       /**
        * @type {Map<string,any>?}
        * @private
        */
-      this._prelimContent = new Map();
+      this._prelimContent = null;
+
+      if (entries === undefined) {
+        this._prelimContent = new Map();
+      } else {
+        this._prelimContent = new Map(entries);
+      }
     }
 
     /**
@@ -4947,6 +5613,15 @@
     }
 
     /**
+     * Returns the size of the YMap (count of key/value pairs)
+     *
+     * @return {number}
+     */
+    get size () {
+      return [...createMapIterator(this._map)].length
+    }
+
+    /**
      * Returns the keys for each element in the YMap Type.
      *
      * @return {IterableIterator<string>}
@@ -4974,7 +5649,7 @@
     }
 
     /**
-     * Executes a provided function on once on overy key-value pair.
+     * Executes a provided function on once on every key-value pair.
      *
      * @param {function(T,string,YMap<T>):void} f A function to execute on every element of this YArray.
      */
@@ -5164,15 +5839,14 @@
    *
    * @param {Transaction} transaction
    * @param {AbstractType<any>} parent
-   * @param {Item|null} left
-   * @param {Item|null} right
+   * @param {ItemListPosition} currPos
    * @param {Map<string,any>} negatedAttributes
-   * @return {ItemListPosition}
    *
    * @private
    * @function
    */
-  const insertNegatedAttributes = (transaction, parent, left, right, negatedAttributes) => {
+  const insertNegatedAttributes = (transaction, parent, currPos, negatedAttributes) => {
+    let { left, right } = currPos;
     // check if we really need to remove attributes
     while (
       right !== null && (
@@ -5188,11 +5862,14 @@
       left = right;
       right = right.right;
     }
+    const doc = transaction.doc;
+    const ownClientId = doc.clientID;
     for (const [key, val] of negatedAttributes) {
-      left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentFormat(key, val));
-      left.integrate(transaction);
+      left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
+      left.integrate(transaction, 0);
     }
-    return { left, right }
+    currPos.left = left;
+    currPos.right = right;
   };
 
   /**
@@ -5212,17 +5889,16 @@
   };
 
   /**
-   * @param {Item|null} left
-   * @param {Item|null} right
+   * @param {ItemListPosition} currPos
    * @param {Map<string,any>} currentAttributes
    * @param {Object<string,any>} attributes
-   * @return {ItemListPosition}
    *
    * @private
    * @function
    */
-  const minimizeAttributeChanges = (left, right, currentAttributes, attributes) => {
+  const minimizeAttributeChanges = (currPos, currentAttributes, attributes) => {
     // go right while attributes[right.key] === right.value (or right is deleted)
+    let { left, right } = currPos;
     while (true) {
       if (right === null) {
         break
@@ -5235,22 +5911,24 @@
       left = right;
       right = right.right;
     }
-    return new ItemListPosition(left, right)
+    currPos.left = left;
+    currPos.right = right;
   };
 
   /**
    * @param {Transaction} transaction
    * @param {AbstractType<any>} parent
-   * @param {Item|null} left
-   * @param {Item|null} right
+   * @param {ItemListPosition} currPos
    * @param {Map<string,any>} currentAttributes
    * @param {Object<string,any>} attributes
-   * @return {ItemInsertionResult}
+   * @return {Map<string,any>}
    *
    * @private
    * @function
    **/
-  const insertAttributes = (transaction, parent, left, right, currentAttributes, attributes) => {
+  const insertAttributes = (transaction, parent, currPos, currentAttributes, attributes) => {
+    const doc = transaction.doc;
+    const ownClientId = doc.clientID;
     const negatedAttributes = new Map();
     // insert format-start items
     for (const key in attributes) {
@@ -5259,62 +5937,60 @@
       if (!equalAttrs(currentVal, val)) {
         // save negated attribute (set null if currentVal undefined)
         negatedAttributes.set(key, currentVal);
-        left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentFormat(key, val));
-        left.integrate(transaction);
+        const { left, right } = currPos;
+        currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
+        currPos.left.integrate(transaction, 0);
       }
     }
-    return new ItemInsertionResult(left, right, negatedAttributes)
+    return negatedAttributes
   };
 
   /**
    * @param {Transaction} transaction
    * @param {AbstractType<any>} parent
-   * @param {Item|null} left
-   * @param {Item|null} right
+   * @param {ItemListPosition} currPos
    * @param {Map<string,any>} currentAttributes
    * @param {string|object} text
    * @param {Object<string,any>} attributes
-   * @return {ItemListPosition}
    *
    * @private
    * @function
    **/
-  const insertText = (transaction, parent, left, right, currentAttributes, text, attributes) => {
+  const insertText = (transaction, parent, currPos, currentAttributes, text, attributes) => {
     for (const [key] of currentAttributes) {
       if (attributes[key] === undefined) {
         attributes[key] = null;
       }
     }
-    const minPos = minimizeAttributeChanges(left, right, currentAttributes, attributes);
-    const insertPos = insertAttributes(transaction, parent, minPos.left, minPos.right, currentAttributes, attributes);
-    left = insertPos.left;
-    right = insertPos.right;
+    const doc = transaction.doc;
+    const ownClientId = doc.clientID;
+    minimizeAttributeChanges(currPos, currentAttributes, attributes);
+    const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes);
     // insert content
     const content = text.constructor === String ? new ContentString(/** @type {string} */ (text)) : new ContentEmbed(text);
-    left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, content);
-    left.integrate(transaction);
-    return insertNegatedAttributes(transaction, parent, left, insertPos.right, insertPos.negatedAttributes)
+    const { left, right } = currPos;
+    currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, content);
+    currPos.left.integrate(transaction, 0);
+    return insertNegatedAttributes(transaction, parent, currPos, negatedAttributes)
   };
 
   /**
    * @param {Transaction} transaction
    * @param {AbstractType<any>} parent
-   * @param {Item|null} left
-   * @param {Item|null} right
+   * @param {ItemListPosition} currPos
    * @param {Map<string,any>} currentAttributes
    * @param {number} length
    * @param {Object<string,any>} attributes
-   * @return {ItemListPosition}
    *
    * @private
    * @function
    */
-  const formatText = (transaction, parent, left, right, currentAttributes, length, attributes) => {
-    const minPos = minimizeAttributeChanges(left, right, currentAttributes, attributes);
-    const insertPos = insertAttributes(transaction, parent, minPos.left, minPos.right, currentAttributes, attributes);
-    const negatedAttributes = insertPos.negatedAttributes;
-    left = insertPos.left;
-    right = insertPos.right;
+  const formatText = (transaction, parent, currPos, currentAttributes, length, attributes) => {
+    const doc = transaction.doc;
+    const ownClientId = doc.clientID;
+    minimizeAttributeChanges(currPos, currentAttributes, attributes);
+    const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes);
+    let { left, right } = currPos;
     // iterate until first non-format or null is found
     // delete all formats with attributes[format.key] != null
     while (length > 0 && right !== null) {
@@ -5354,16 +6030,121 @@
       for (; length > 0; length--) {
         newlines += '\n';
       }
-      left = new Item(nextID(transaction), left, left === null ? null : left.lastId, right, right === null ? null : right.id, parent, null, new ContentString(newlines));
-      left.integrate(transaction);
+      left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentString(newlines));
+      left.integrate(transaction, 0);
     }
-    return insertNegatedAttributes(transaction, parent, left, right, negatedAttributes)
+    currPos.left = left;
+    currPos.right = right;
+    insertNegatedAttributes(transaction, parent, currPos, negatedAttributes);
+  };
+
+  /**
+   * Call this function after string content has been deleted in order to
+   * clean up formatting Items.
+   *
+   * @param {Transaction} transaction
+   * @param {Item} start
+   * @param {Item|null} end exclusive end, automatically iterates to the next Content Item
+   * @param {Map<string,any>} startAttributes
+   * @param {Map<string,any>} endAttributes This attribute is modified!
+   * @return {number} The amount of formatting Items deleted.
+   *
+   * @function
+   */
+  const cleanupFormattingGap = (transaction, start, end, startAttributes, endAttributes) => {
+    while (end && end.content.constructor !== ContentString && end.content.constructor !== ContentEmbed) {
+      if (!end.deleted && end.content.constructor === ContentFormat) {
+        updateCurrentAttributes(endAttributes, /** @type {ContentFormat} */ (end.content));
+      }
+      end = end.right;
+    }
+    let cleanups = 0;
+    while (start !== end) {
+      if (!start.deleted) {
+        const content = start.content;
+        switch (content.constructor) {
+          case ContentFormat: {
+            const { key, value } = /** @type {ContentFormat} */ (content);
+            if ((endAttributes.get(key) || null) !== value || (startAttributes.get(key) || null) === value) {
+              // Either this format is overwritten or it is not necessary because the attribute already existed.
+              start.delete(transaction);
+              cleanups++;
+            }
+            break
+          }
+        }
+      }
+      start = /** @type {Item} */ (start.right);
+    }
+    return cleanups
   };
 
   /**
    * @param {Transaction} transaction
-   * @param {Item|null} left
-   * @param {Item|null} right
+   * @param {Item | null} item
+   */
+  const cleanupContextlessFormattingGap = (transaction, item) => {
+    // iterate until item.right is null or content
+    while (item && item.right && (item.right.deleted || (item.right.content.constructor !== ContentString && item.right.content.constructor !== ContentEmbed))) {
+      item = item.right;
+    }
+    const attrs = new Set();
+    // iterate back until a content item is found
+    while (item && (item.deleted || (item.content.constructor !== ContentString && item.content.constructor !== ContentEmbed))) {
+      if (!item.deleted && item.content.constructor === ContentFormat) {
+        const key = /** @type {ContentFormat} */ (item.content).key;
+        if (attrs.has(key)) {
+          item.delete(transaction);
+        } else {
+          attrs.add(key);
+        }
+      }
+      item = item.left;
+    }
+  };
+
+  /**
+   * This function is experimental and subject to change / be removed.
+   *
+   * Ideally, we don't need this function at all. Formatting attributes should be cleaned up
+   * automatically after each change. This function iterates twice over the complete YText type
+   * and removes unnecessary formatting attributes. This is also helpful for testing.
+   *
+   * This function won't be exported anymore as soon as there is confidence that the YText type works as intended.
+   *
+   * @param {YText} type
+   * @return {number} How many formatting attributes have been cleaned up.
+   */
+  const cleanupYTextFormatting = type => {
+    let res = 0;
+    transact(/** @type {Doc} */ (type.doc), transaction => {
+      let start = /** @type {Item} */ (type._start);
+      let end = type._start;
+      let startAttributes = create();
+      const currentAttributes = copy(startAttributes);
+      while (end) {
+        if (end.deleted === false) {
+          switch (end.content.constructor) {
+            case ContentFormat:
+              updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (end.content));
+              break
+            case ContentEmbed:
+            case ContentString:
+              res += cleanupFormattingGap(transaction, start, end, startAttributes, currentAttributes);
+              startAttributes = copy(currentAttributes);
+              start = end;
+              break
+          }
+        }
+        end = end.right;
+      }
+    });
+    return res
+  };
+
+  /**
+   * @param {Transaction} transaction
+   * @param {ItemListPosition} currPos
    * @param {Map<string,any>} currentAttributes
    * @param {number} length
    * @return {ItemListPosition}
@@ -5371,7 +6152,10 @@
    * @private
    * @function
    */
-  const deleteText = (transaction, left, right, currentAttributes, length) => {
+  const deleteText = (transaction, currPos, currentAttributes, length) => {
+    const startAttrs = copy(currentAttributes);
+    const start = currPos.right;
+    let { left, right } = currPos;
     while (length > 0 && right !== null) {
       if (right.deleted === false) {
         switch (right.content.constructor) {
@@ -5391,7 +6175,12 @@
       left = right;
       right = right.right;
     }
-    return { left, right }
+    if (start) {
+      cleanupFormattingGap(transaction, start, right, startAttrs, copy(currentAttributes));
+    }
+    currPos.left = left;
+    currPos.right = right;
+    return currPos
   };
 
   /**
@@ -5689,7 +6478,48 @@
      * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
      */
     _callObserver (transaction, parentSubs) {
-      callTypeObservers(this, transaction, new YTextEvent(this, transaction));
+      const event = new YTextEvent(this, transaction);
+      const doc = transaction.doc;
+      // If a remote change happened, we try to cleanup potential formatting duplicates.
+      if (!transaction.local) {
+        // check if another formatting item was inserted
+        let foundFormattingItem = false;
+        for (const [client, afterClock] of transaction.afterState) {
+          const clock = transaction.beforeState.get(client) || 0;
+          if (afterClock === clock) {
+            continue
+          }
+          iterateStructs(transaction, /** @type {Array<Item|GC>} */ (doc.store.clients.get(client)), clock, afterClock, item => {
+            // @ts-ignore
+            if (!item.deleted && item.content.constructor === ContentFormat) {
+              foundFormattingItem = true;
+            }
+          });
+          if (foundFormattingItem) {
+            break
+          }
+        }
+        transact(doc, t => {
+          if (foundFormattingItem) {
+            // If a formatting item was inserted, we simply clean the whole type.
+            // We need to compute currentAttributes for the current position anyway.
+            cleanupYTextFormatting(this);
+          } else {
+            // If no formatting attribute was inserted, we can make due with contextless
+            // formatting cleanups.
+            // Contextless: it is not necessary to compute currentAttributes for the affected position.
+            iterateDeletedStructs(t, transaction.deleteSet, item => {
+              if (item instanceof GC) {
+                return
+              }
+              if (item.parent === this) {
+                cleanupContextlessFormattingGap(t, item);
+              }
+            });
+          }
+        });
+      }
+      callTypeObservers(this, transaction, event);
     }
 
     /**
@@ -5726,16 +6556,19 @@
      * Apply a {@link Delta} on this shared YText type.
      *
      * @param {any} delta The changes to apply on this element.
+     * @param {object}  [opts]
+     * @param {boolean} [opts.sanitize] Sanitize input delta. Removes ending newlines if set to true.
+     *
      *
      * @public
      */
-    applyDelta (delta) {
+    applyDelta (delta, { sanitize = true } = {}) {
       if (this.doc !== null) {
         transact(this.doc, transaction => {
           /**
            * @type {ItemListPosition}
            */
-          let pos = new ItemListPosition(null, this._start);
+          const currPos = new ItemListPosition(null, this._start);
           const currentAttributes = new Map();
           for (let i = 0; i < delta.length; i++) {
             const op = delta[i];
@@ -5745,14 +6578,14 @@
               // there is a newline at the end of the content.
               // If we omit this step, clients will see a different number of
               // paragraphs, but nothing bad will happen.
-              const ins = (typeof op.insert === 'string' && i === delta.length - 1 && pos.right === null && op.insert.slice(-1) === '\n') ? op.insert.slice(0, -1) : op.insert;
+              const ins = (!sanitize && typeof op.insert === 'string' && i === delta.length - 1 && currPos.right === null && op.insert.slice(-1) === '\n') ? op.insert.slice(0, -1) : op.insert;
               if (typeof ins !== 'string' || ins.length > 0) {
-                pos = insertText(transaction, this, pos.left, pos.right, currentAttributes, ins, op.attributes || {});
+                insertText(transaction, this, currPos, currentAttributes, ins, op.attributes || {});
               }
             } else if (op.retain !== undefined) {
-              pos = formatText(transaction, this, pos.left, pos.right, currentAttributes, op.retain, op.attributes || {});
+              formatText(transaction, this, currPos, currentAttributes, op.retain, op.attributes || {});
             } else if (op.delete !== undefined) {
-              pos = deleteText(transaction, pos.left, pos.right, currentAttributes, op.delete);
+              deleteText(transaction, currPos, currentAttributes, op.delete);
             }
           }
         });
@@ -5890,7 +6723,7 @@
             // @ts-ignore
             currentAttributes.forEach((v, k) => { attributes[k] = v; });
           }
-          insertText(transaction, this, left, right, currentAttributes, text, attributes);
+          insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, text, attributes);
         });
       } else {
         /** @type {Array<function>} */ (this._pending).push(() => this.insert(index, text, attributes));
@@ -5915,7 +6748,7 @@
       if (y !== null) {
         transact(y, transaction => {
           const { left, right, currentAttributes } = findPosition(transaction, this, index);
-          insertText(transaction, this, left, right, currentAttributes, embed, attributes);
+          insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, embed, attributes);
         });
       } else {
         /** @type {Array<function>} */ (this._pending).push(() => this.insertEmbed(index, embed, attributes));
@@ -5938,7 +6771,7 @@
       if (y !== null) {
         transact(y, transaction => {
           const { left, right, currentAttributes } = findPosition(transaction, this, index);
-          deleteText(transaction, left, right, currentAttributes, length);
+          deleteText(transaction, new ItemListPosition(left, right), currentAttributes, length);
         });
       } else {
         /** @type {Array<function>} */ (this._pending).push(() => this.delete(index, length));
@@ -5956,6 +6789,9 @@
      * @public
      */
     format (index, length, attributes) {
+      if (length === 0) {
+        return
+      }
       const y = this.doc;
       if (y !== null) {
         transact(y, transaction => {
@@ -5963,7 +6799,7 @@
           if (right === null) {
             return
           }
-          formatText(transaction, this, left, right, currentAttributes, length, attributes);
+          formatText(transaction, this, new ItemListPosition(left, right), currentAttributes, length, attributes);
         });
       } else {
         /** @type {Array<function>} */ (this._pending).push(() => this.format(index, length, attributes));
@@ -6019,7 +6855,7 @@
    * Can be created with {@link YXmlFragment#createTreeWalker}
    *
    * @public
-   * @implements {IterableIterator}
+   * @implements {Iterable<YXmlElement|YXmlText|YXmlElement|YXmlHook>}
    */
   class YXmlTreeWalker {
     /**
@@ -6052,10 +6888,10 @@
        * @type {Item|null}
        */
       let n = this._currentNode;
-      let type = /** @type {ContentType} */ (n.content).type;
+      let type = /** @type {any} */ (n.content).type;
       if (n !== null && (!this._firstCall || n.deleted || !this._filter(type))) { // if first call, we check if we can use the first item
         do {
-          type = /** @type {ContentType} */ (n.content).type;
+          type = /** @type {any} */ (n.content).type;
           if (!n.deleted && (type.constructor === YXmlElement || type.constructor === YXmlFragment) && type._start !== null) {
             // walk down in the tree
             n = type._start;
@@ -6068,7 +6904,7 @@
               } else if (n.parent === this._root) {
                 n = null;
               } else {
-                n = n.parent._item;
+                n = /** @type {AbstractType<any>} */ (n.parent)._item;
               }
             }
           }
@@ -6704,14 +7540,15 @@
      * @param {number} length
      */
     constructor (id, length) {
-      /**
-       * The uniqe identifier of this struct.
-       * @type {ID}
-       * @readonly
-       */
       this.id = id;
       this.length = length;
-      this.deleted = false;
+    }
+
+    /**
+     * @type {boolean}
+     */
+    get deleted () {
+      throw methodUnimplemented()
     }
 
     /**
@@ -6736,43 +7573,9 @@
 
     /**
      * @param {Transaction} transaction
-     */
-    integrate (transaction) {
-      throw methodUnimplemented()
-    }
-  }
-
-  class AbstractStructRef {
-    /**
-     * @param {ID} id
-     */
-    constructor (id) {
-      /**
-       * @type {Array<ID>}
-       */
-      this._missing = [];
-      /**
-       * The uniqe identifier of this type.
-       * @type {ID}
-       */
-      this.id = id;
-    }
-
-    /**
-     * @param {Transaction} transaction
-     * @return {Array<ID|null>}
-     */
-    getMissing (transaction) {
-      return this._missing
-    }
-
-    /**
-     * @param {Transaction} transaction
-     * @param {StructStore} store
      * @param {number} offset
-     * @return {AbstractStruct}
      */
-    toStruct (transaction, store, offset) {
+    integrate (transaction, offset) {
       throw methodUnimplemented()
     }
   }
@@ -6783,13 +7586,8 @@
    * @private
    */
   class GC extends AbstractStruct {
-    /**
-     * @param {ID} id
-     * @param {number} length
-     */
-    constructor (id, length) {
-      super(id, length);
-      this.deleted = true;
+    get deleted () {
+      return true
     }
 
     delete () {}
@@ -6805,8 +7603,13 @@
 
     /**
      * @param {Transaction} transaction
+     * @param {number} offset
      */
-    integrate (transaction) {
+    integrate (transaction, offset) {
+      if (offset > 0) {
+        this.id.clock += offset;
+        this.length -= offset;
+      }
       addStruct(transaction.doc.store, this);
     }
 
@@ -6818,41 +7621,14 @@
       writeUint8(encoder, structGCRefNumber);
       writeVarUint(encoder, this.length - offset);
     }
-  }
-
-  /**
-   * @private
-   */
-  class GCRef extends AbstractStructRef {
-    /**
-     * @param {decoding.Decoder} decoder
-     * @param {ID} id
-     * @param {number} info
-     */
-    constructor (decoder, id, info) {
-      super(id);
-      /**
-       * @type {number}
-       */
-      this.length = readVarUint(decoder);
-    }
 
     /**
      * @param {Transaction} transaction
      * @param {StructStore} store
-     * @param {number} offset
-     * @return {GC}
+     * @return {null | number}
      */
-    toStruct (transaction, store, offset) {
-      if (offset > 0) {
-        // @ts-ignore
-        this.id = createID(this.id.client, this.id.clock + offset);
-        this.length -= offset;
-      }
-      return new GC(
-        this.id,
-        this.length
-      )
+    getMissing (transaction, store) {
+      return null
     }
   }
 
@@ -7004,7 +7780,7 @@
      */
     integrate (transaction, item) {
       addToDeleteSet(transaction.deleteSet, item.id, this.len);
-      item.deleted = true;
+      item.markDeleted();
     }
 
     /**
@@ -7643,7 +8419,7 @@
           // We try to merge all deleted items after each transaction,
           // but we have no knowledge about that this needs to be merged
           // since it is not in transaction.ds. Hence we add it to transaction._mergeStructs
-          transaction._mergeStructs.add(item.id);
+          transaction._mergeStructs.push(item);
         }
         item = item.right;
       }
@@ -7652,7 +8428,7 @@
           item.delete(transaction);
         } else {
           // same as above
-          transaction._mergeStructs.add(item.id);
+          transaction._mergeStructs.push(item);
         }
       });
       transaction.changed.delete(this.type);
@@ -7740,7 +8516,7 @@
   const keepItem = (item, keep) => {
     while (item !== null && item.keep !== keep) {
       item.keep = keep;
-      item = item.parent._item;
+      item = /** @type {AbstractType<any>} */ (item.parent)._item;
     }
   };
 
@@ -7755,12 +8531,12 @@
    * @private
    */
   const splitItem = (transaction, leftItem, diff) => {
-    const id = leftItem.id;
     // create rightItem
+    const { client, clock } = leftItem.id;
     const rightItem = new Item(
-      createID(id.client, id.clock + diff),
+      createID(client, clock + diff),
       leftItem,
-      createID(id.client, id.clock + diff - 1),
+      createID(client, clock + diff - 1),
       leftItem.right,
       leftItem.rightOrigin,
       leftItem.parent,
@@ -7768,7 +8544,7 @@
       leftItem.content.splice(diff)
     );
     if (leftItem.deleted) {
-      rightItem.deleted = true;
+      rightItem.markDeleted();
     }
     if (leftItem.keep) {
       rightItem.keep = true;
@@ -7783,10 +8559,10 @@
       rightItem.right.left = rightItem;
     }
     // right is more specific.
-    transaction._mergeStructs.add(rightItem.id);
+    transaction._mergeStructs.push(rightItem);
     // update parent._map
     if (rightItem.parentSub !== null && rightItem.right === null) {
-      rightItem.parent._map.set(rightItem.parentSub, rightItem);
+      /** @type {AbstractType<any>} */ (rightItem.parent)._map.set(rightItem.parentSub, rightItem);
     }
     leftItem.length = diff;
     return rightItem
@@ -7804,10 +8580,14 @@
    * @private
    */
   const redoItem = (transaction, item, redoitems) => {
-    if (item.redone !== null) {
-      return getItemCleanStart(transaction, item.redone)
+    const doc = transaction.doc;
+    const store = doc.store;
+    const ownClientID = doc.clientID;
+    const redone = item.redone;
+    if (redone !== null) {
+      return getItemCleanStart(transaction, redone)
     }
-    let parentItem = item.parent._item;
+    let parentItem = /** @type {AbstractType<any>} */ (item.parent)._item;
     /**
      * @type {Item|null}
      */
@@ -7825,14 +8605,14 @@
       left = item;
       while (left.right !== null) {
         left = left.right;
-        if (left.id.client !== transaction.doc.clientID) {
+        if (left.id.client !== ownClientID) {
           // It is not possible to redo this item because it conflicts with a
           // change from another client
           return null
         }
       }
       if (left.right !== null) {
-        left = /** @type {Item} */ (item.parent._map.get(item.parentSub));
+        left = /** @type {Item} */ (/** @type {AbstractType<any>} */ (item.parent)._map.get(item.parentSub));
       }
       right = null;
     }
@@ -7854,10 +8634,10 @@
          */
         let leftTrace = left;
         // trace redone until parent matches
-        while (leftTrace !== null && leftTrace.parent._item !== parentItem) {
+        while (leftTrace !== null && /** @type {AbstractType<any>} */ (leftTrace.parent)._item !== parentItem) {
           leftTrace = leftTrace.redone === null ? null : getItemCleanStart(transaction, leftTrace.redone);
         }
-        if (leftTrace !== null && leftTrace.parent._item === parentItem) {
+        if (leftTrace !== null && /** @type {AbstractType<any>} */ (leftTrace.parent)._item === parentItem) {
           left = leftTrace;
           break
         }
@@ -7869,27 +8649,29 @@
          */
         let rightTrace = right;
         // trace redone until parent matches
-        while (rightTrace !== null && rightTrace.parent._item !== parentItem) {
+        while (rightTrace !== null && /** @type {AbstractType<any>} */ (rightTrace.parent)._item !== parentItem) {
           rightTrace = rightTrace.redone === null ? null : getItemCleanStart(transaction, rightTrace.redone);
         }
-        if (rightTrace !== null && rightTrace.parent._item === parentItem) {
+        if (rightTrace !== null && /** @type {AbstractType<any>} */ (rightTrace.parent)._item === parentItem) {
           right = rightTrace;
           break
         }
         right = right.right;
       }
     }
+    const nextClock = getState(store, ownClientID);
+    const nextId = createID(ownClientID, nextClock);
     const redoneItem = new Item(
-      nextID(transaction),
-      left, left === null ? null : left.lastId,
-      right, right === null ? null : right.id,
+      nextId,
+      left, left && left.lastId,
+      right, right && right.id,
       parentItem === null ? item.parent : /** @type {ContentType} */ (parentItem.content).type,
       item.parentSub,
       item.content.copy()
     );
-    item.redone = redoneItem.id;
+    item.redone = nextId;
     keepItem(redoneItem, true);
-    redoneItem.integrate(transaction);
+    redoneItem.integrate(transaction, 0);
     return redoneItem
   };
 
@@ -7903,7 +8685,7 @@
      * @param {ID | null} origin
      * @param {Item | null} right
      * @param {ID | null} rightOrigin
-     * @param {AbstractType<any>} parent
+     * @param {AbstractType<any>|ID|null} parent Is a type if integrated, is null if it is possible to copy parent from left or right, is ID before integration to search for it.
      * @param {string | null} parentSub
      * @param {AbstractContent} content
      */
@@ -7912,7 +8694,6 @@
       /**
        * The item that was originally to the left of this item.
        * @type {ID | null}
-       * @readonly
        */
       this.origin = origin;
       /**
@@ -7927,14 +8708,11 @@
       this.right = right;
       /**
        * The item that was originally to the right of this item.
-       * @readonly
        * @type {ID | null}
        */
       this.rightOrigin = rightOrigin;
       /**
-       * The parent type.
-       * @type {AbstractType<any>}
-       * @readonly
+       * @type {AbstractType<any>|ID|null}
        */
       this.parent = parent;
       /**
@@ -7943,14 +8721,8 @@
        * to insert this item. If `parentSub = null` type._start is the list in
        * which to insert to. Otherwise it is `parent._map`.
        * @type {String | null}
-       * @readonly
        */
       this.parentSub = parentSub;
-      /**
-       * Whether this item was deleted or not.
-       * @type {Boolean}
-       */
-      this.deleted = false;
       /**
        * If this type's effect is reundone this type refers to the type that undid
        * this operation.
@@ -7961,109 +8733,213 @@
        * @type {AbstractContent}
        */
       this.content = content;
-      this.length = content.getLength();
-      this.countable = content.isCountable();
-      /**
-       * If true, do not garbage collect this Item.
-       */
-      this.keep = false;
+      this.info = this.content.isCountable() ? BIT2 : 0;
+    }
+
+    /**
+     * If true, do not garbage collect this Item.
+     */
+    get keep () {
+      return (this.info & BIT1) > 0
+    }
+
+    set keep (doKeep) {
+      if (this.keep !== doKeep) {
+        this.info ^= BIT1;
+      }
+    }
+
+    get countable () {
+      return (this.info & BIT2) > 0
+    }
+
+    /**
+     * Whether this item was deleted or not.
+     * @type {Boolean}
+     */
+    get deleted () {
+      return (this.info & BIT3) > 0
+    }
+
+    set deleted (doDelete) {
+      if (this.deleted !== doDelete) {
+        this.info ^= BIT3;
+      }
+    }
+
+    markDeleted () {
+      this.info |= BIT3;
+    }
+
+    /**
+     * Return the creator clientID of the missing op or define missing items and return null.
+     *
+     * @param {Transaction} transaction
+     * @param {StructStore} store
+     * @return {null | number}
+     */
+    getMissing (transaction, store) {
+      if (this.origin && this.origin.client !== this.id.client && this.origin.clock >= getState(store, this.origin.client)) {
+        return this.origin.client
+      }
+      if (this.rightOrigin && this.rightOrigin.client !== this.id.client && this.rightOrigin.clock >= getState(store, this.rightOrigin.client)) {
+        return this.rightOrigin.client
+      }
+      if (this.parent && this.parent.constructor === ID && this.id.client !== this.parent.client && this.parent.clock >= getState(store, this.parent.client)) {
+        return this.parent.client
+      }
+
+      // We have all missing ids, now find the items
+
+      if (this.origin) {
+        this.left = getItemCleanEnd(transaction, store, this.origin);
+        this.origin = this.left.lastId;
+      }
+      if (this.rightOrigin) {
+        this.right = getItemCleanStart(transaction, this.rightOrigin);
+        this.rightOrigin = this.right.id;
+      }
+      if ((this.left && this.left.constructor === GC) || (this.right && this.right.constructor === GC)) {
+        this.parent = null;
+      }
+      // only set parent if this shouldn't be garbage collected
+      if (!this.parent) {
+        if (this.left && this.left.constructor === Item) {
+          this.parent = this.left.parent;
+          this.parentSub = this.left.parentSub;
+        }
+        if (this.right && this.right.constructor === Item) {
+          this.parent = this.right.parent;
+          this.parentSub = this.right.parentSub;
+        }
+      } else if (this.parent.constructor === ID) {
+        const parentItem = getItem(store, this.parent);
+        if (parentItem.constructor === GC) {
+          this.parent = null;
+        } else {
+          this.parent = /** @type {ContentType} */ (parentItem.content).type;
+        }
+      }
+      return null
     }
 
     /**
      * @param {Transaction} transaction
+     * @param {number} offset
      */
-    integrate (transaction) {
-      const store = transaction.doc.store;
-      const id = this.id;
-      const parent = this.parent;
-      const parentSub = this.parentSub;
-      const length = this.length;
-      /**
-       * @type {Item|null}
-       */
-      let o;
-      // set o to the first conflicting item
-      if (this.left !== null) {
-        o = this.left.right;
-      } else if (parentSub !== null) {
-        o = parent._map.get(parentSub) || null;
-        while (o !== null && o.left !== null) {
-          o = o.left;
-        }
-      } else {
-        o = parent._start;
+    integrate (transaction, offset) {
+      if (offset > 0) {
+        this.id.clock += offset;
+        this.left = getItemCleanEnd(transaction, transaction.doc.store, createID(this.id.client, this.id.clock - 1));
+        this.origin = this.left.lastId;
+        this.content = this.content.splice(offset);
+        this.length -= offset;
       }
-      // TODO: use something like DeleteSet here (a tree implementation would be best)
-      /**
-       * @type {Set<Item>}
-       */
-      const conflictingItems = new Set();
-      /**
-       * @type {Set<Item>}
-       */
-      const itemsBeforeOrigin = new Set();
-      // Let c in conflictingItems, b in itemsBeforeOrigin
-      // ***{origin}bbbb{this}{c,b}{c,b}{o}***
-      // Note that conflictingItems is a subset of itemsBeforeOrigin
-      while (o !== null && o !== this.right) {
-        itemsBeforeOrigin.add(o);
-        conflictingItems.add(o);
-        if (compareIDs(this.origin, o.origin)) {
-          // case 1
-          if (o.id.client < id.client) {
-            this.left = o;
-            conflictingItems.clear();
+
+      if (this.parent) {
+        if ((!this.left && (!this.right || this.right.left !== null)) || (this.left && this.left.right !== this.right)) {
+          /**
+           * @type {Item|null}
+           */
+          let left = this.left;
+
+          /**
+           * @type {Item|null}
+           */
+          let o;
+          // set o to the first conflicting item
+          if (left !== null) {
+            o = left.right;
+          } else if (this.parentSub !== null) {
+            o = /** @type {AbstractType<any>} */ (this.parent)._map.get(this.parentSub) || null;
+            while (o !== null && o.left !== null) {
+              o = o.left;
+            }
+          } else {
+            o = /** @type {AbstractType<any>} */ (this.parent)._start;
           }
-        } else if (o.origin !== null && itemsBeforeOrigin.has(getItem(store, o.origin))) {
-          // case 2
-          if (o.origin === null || !conflictingItems.has(getItem(store, o.origin))) {
-            this.left = o;
-            conflictingItems.clear();
+          // TODO: use something like DeleteSet here (a tree implementation would be best)
+          // @todo use global set definitions
+          /**
+           * @type {Set<Item>}
+           */
+          const conflictingItems = new Set();
+          /**
+           * @type {Set<Item>}
+           */
+          const itemsBeforeOrigin = new Set();
+          // Let c in conflictingItems, b in itemsBeforeOrigin
+          // ***{origin}bbbb{this}{c,b}{c,b}{o}***
+          // Note that conflictingItems is a subset of itemsBeforeOrigin
+          while (o !== null && o !== this.right) {
+            itemsBeforeOrigin.add(o);
+            conflictingItems.add(o);
+            if (compareIDs(this.origin, o.origin)) {
+              // case 1
+              if (o.id.client < this.id.client) {
+                left = o;
+                conflictingItems.clear();
+              } else if (compareIDs(this.rightOrigin, o.rightOrigin)) {
+                // this and o are conflicting and point to the same integration points. The id decides which item comes first.
+                // Since this is to the left of o, we can break here
+                break
+              } // else, o might be integrated before an item that this conflicts with. If so, we will find it in the next iterations
+            } else if (o.origin !== null && itemsBeforeOrigin.has(getItem(transaction.doc.store, o.origin))) { // use getItem instead of getItemCleanEnd because we don't want / need to split items.
+              // case 2
+              if (!conflictingItems.has(getItem(transaction.doc.store, o.origin))) {
+                left = o;
+                conflictingItems.clear();
+              }
+            } else {
+              break
+            }
+            o = o.right;
           }
-        } else {
-          break
+          this.left = left;
         }
-        o = o.right;
-      }
-      // reconnect left/right + update parent map/start if necessary
-      if (this.left !== null) {
-        const right = this.left.right;
-        this.right = right;
-        this.left.right = this;
-      } else {
-        let r;
-        if (parentSub !== null) {
-          r = parent._map.get(parentSub) || null;
-          while (r !== null && r.left !== null) {
-            r = r.left;
-          }
-        } else {
-          r = parent._start;
-          parent._start = this;
-        }
-        this.right = r;
-      }
-      if (this.right !== null) {
-        this.right.left = this;
-      } else if (parentSub !== null) {
-        // set as current parent value if right === null and this is parentSub
-        parent._map.set(parentSub, this);
+        // reconnect left/right + update parent map/start if necessary
         if (this.left !== null) {
-          // this is the current attribute value of parent. delete right
-          this.left.delete(transaction);
+          const right = this.left.right;
+          this.right = right;
+          this.left.right = this;
+        } else {
+          let r;
+          if (this.parentSub !== null) {
+            r = /** @type {AbstractType<any>} */ (this.parent)._map.get(this.parentSub) || null;
+            while (r !== null && r.left !== null) {
+              r = r.left;
+            }
+          } else {
+            r = /** @type {AbstractType<any>} */ (this.parent)._start
+            ;/** @type {AbstractType<any>} */ (this.parent)._start = this;
+          }
+          this.right = r;
         }
-      }
-      // adjust length of parent
-      if (parentSub === null && this.countable && !this.deleted) {
-        parent._length += length;
-      }
-      addStruct(store, this);
-      this.content.integrate(transaction, this);
-      // add parent to transaction.changed
-      addChangedTypeToTransaction(transaction, parent, parentSub);
-      if ((parent._item !== null && parent._item.deleted) || (this.right !== null && parentSub !== null)) {
-        // delete if parent is deleted or if this is not the current attribute value of parent
-        this.delete(transaction);
+        if (this.right !== null) {
+          this.right.left = this;
+        } else if (this.parentSub !== null) {
+          // set as current parent value if right === null and this is parentSub
+          /** @type {AbstractType<any>} */ (this.parent)._map.set(this.parentSub, this);
+          if (this.left !== null) {
+            // this is the current attribute value of parent. delete right
+            this.left.delete(transaction);
+          }
+        }
+        // adjust length of parent
+        if (this.parentSub === null && this.countable && !this.deleted) {
+          /** @type {AbstractType<any>} */ (this.parent)._length += this.length;
+        }
+        addStruct(transaction.doc.store, this);
+        this.content.integrate(transaction, this);
+        // add parent to transaction.changed
+        addChangedTypeToTransaction(transaction, /** @type {AbstractType<any>} */ (this.parent), this.parentSub);
+        if ((/** @type {AbstractType<any>} */ (this.parent)._item !== null && /** @type {AbstractType<any>} */ (this.parent)._item.deleted) || (this.right !== null && this.parentSub !== null)) {
+          // delete if parent is deleted or if this is not the current attribute value of parent
+          this.delete(transaction);
+        }
+      } else {
+        // parent is not defined. Integrate GC struct instead
+        new GC(this.id, this.length).integrate(transaction, 0);
       }
     }
 
@@ -8093,7 +8969,8 @@
      * Computes the last content address of this Item.
      */
     get lastId () {
-      return createID(this.id.client, this.id.clock + this.length - 1)
+      // allocating ids is pretty costly because of the amount of ids created, so we try to reuse whenever possible
+      return this.length === 1 ? this.id : createID(this.id.client, this.id.clock + this.length - 1)
     }
 
     /**
@@ -8135,12 +9012,12 @@
      */
     delete (transaction) {
       if (!this.deleted) {
-        const parent = this.parent;
+        const parent = /** @type {AbstractType<any>} */ (this.parent);
         // adjust the length of parent
         if (this.countable && this.parentSub === null) {
           parent._length -= this.length;
         }
-        this.deleted = true;
+        this.markDeleted();
         addToDeleteSet(transaction.deleteSet, this.id, this.length);
         setIfUndefined(transaction.changed, parent, create$1).add(this.parentSub);
         this.content.delete(transaction);
@@ -8188,8 +9065,9 @@
         writeID(encoder, rightOrigin);
       }
       if (origin === null && rightOrigin === null) {
-        const parent = this.parent;
-        if (parent._item === null) {
+        const parent = /** @type {AbstractType<any>} */ (this.parent);
+        const parentItem = parent._item;
+        if (parentItem === null) {
           // parent type on y._map
           // find the correct key
           const ykey = findRootTypeKey(parent);
@@ -8197,7 +9075,7 @@
           writeVarString(encoder, ykey);
         } else {
           writeVarUint(encoder, 0); // write parent id
-          writeID(encoder, parent._item.id);
+          writeID(encoder, parentItem.id);
         }
         if (parentSub !== null) {
           writeVarString(encoder, parentSub);
@@ -8323,675 +9201,39 @@
   }
 
   /**
-   * @private
+   * @param {decoding.Decoder} decoder
+   * @param {ID} id
+   * @param {number} info
+   * @param {Doc} doc
    */
-  class ItemRef extends AbstractStructRef {
+  const readItem = (decoder, id, info, doc) => {
     /**
-     * @param {decoding.Decoder} decoder
-     * @param {ID} id
-     * @param {number} info
+     * The item that was originally to the left of this item.
+     * @type {ID | null}
      */
-    constructor (decoder, id, info) {
-      super(id);
-      /**
-       * The item that was originally to the left of this item.
-       * @type {ID | null}
-       */
-      this.left = (info & BIT8) === BIT8 ? readID(decoder) : null;
-      /**
-       * The item that was originally to the right of this item.
-       * @type {ID | null}
-       */
-      this.right = (info & BIT7) === BIT7 ? readID(decoder) : null;
-      const canCopyParentInfo = (info & (BIT7 | BIT8)) === 0;
-      const hasParentYKey = canCopyParentInfo ? readVarUint(decoder) === 1 : false;
-      /**
-       * If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
-       * and we read the next string as parentYKey.
-       * It indicates how we store/retrieve parent from `y.share`
-       * @type {string|null}
-       */
-      this.parentYKey = canCopyParentInfo && hasParentYKey ? readVarString(decoder) : null;
-      /**
-       * The parent type.
-       * @type {ID | null}
-       */
-      this.parent = canCopyParentInfo && !hasParentYKey ? readID(decoder) : null;
-      /**
-       * If the parent refers to this item with some kind of key (e.g. YMap, the
-       * key is specified here. The key is then used to refer to the list in which
-       * to insert this item. If `parentSub = null` type._start is the list in
-       * which to insert to. Otherwise it is `parent._map`.
-       * @type {String | null}
-       */
-      this.parentSub = canCopyParentInfo && (info & BIT6) === BIT6 ? readVarString(decoder) : null;
-      const missing = this._missing;
-      if (this.left !== null) {
-        missing.push(this.left);
-      }
-      if (this.right !== null) {
-        missing.push(this.right);
-      }
-      if (this.parent !== null) {
-        missing.push(this.parent);
-      }
-      /**
-       * @type {AbstractContent}
-       */
-      this.content = readItemContent(decoder, info);
-      this.length = this.content.getLength();
-    }
-
+    const origin = (info & BIT8) === BIT8 ? readID(decoder) : null;
     /**
-     * @param {Transaction} transaction
-     * @param {StructStore} store
-     * @param {number} offset
-     * @return {Item|GC}
+     * The item that was originally to the right of this item.
+     * @type {ID | null}
      */
-    toStruct (transaction, store, offset) {
-      if (offset > 0) {
-        /**
-         * @type {ID}
-         */
-        const id = this.id;
-        this.id = createID(id.client, id.clock + offset);
-        this.left = createID(this.id.client, this.id.clock - 1);
-        this.content = this.content.splice(offset);
-        this.length -= offset;
-      }
-
-      const left = this.left === null ? null : getItemCleanEnd(transaction, store, this.left);
-      const right = this.right === null ? null : getItemCleanStart(transaction, this.right);
-      let parent = null;
-      let parentSub = this.parentSub;
-      if (this.parent !== null) {
-        const parentItem = getItem(store, this.parent);
-        // Edge case: toStruct is called with an offset > 0. In this case left is defined.
-        // Depending in which order structs arrive, left may be GC'd and the parent not
-        // deleted. This is why we check if left is GC'd. Strictly we don't have
-        // to check if right is GC'd, but we will in case we run into future issues
-        if (!parentItem.deleted && (left === null || left.constructor !== GC) && (right === null || right.constructor !== GC)) {
-          parent = /** @type {ContentType} */ (parentItem.content).type;
-        }
-      } else if (this.parentYKey !== null) {
-        parent = transaction.doc.get(this.parentYKey);
-      } else if (left !== null) {
-        if (left.constructor !== GC) {
-          parent = left.parent;
-          parentSub = left.parentSub;
-        }
-      } else if (right !== null) {
-        if (right.constructor !== GC) {
-          parent = right.parent;
-          parentSub = right.parentSub;
-        }
-      } else {
-        throw unexpectedCase()
-      }
-
-      return parent === null
-        ? new GC(this.id, this.length)
-        : new Item(
-          this.id,
-          left,
-          this.left,
-          right,
-          this.right,
-          parent,
-          parentSub,
-          this.content
-        )
-    }
-  }
-
-  /**
-   * Utility module to work with EcmaScript Symbols.
-   *
-   * @module symbol
-   */
-
-  /**
-   * Return fresh symbol.
-   *
-   * @return {Symbol}
-   */
-  const create$3 = Symbol;
-
-  /**
-   * Working with value pairs.
-   *
-   * @module pair
-   */
-
-  /**
-   * @template L,R
-   */
-  class Pair {
+    const rightOrigin = (info & BIT7) === BIT7 ? readID(decoder) : null;
+    const canCopyParentInfo = (info & (BIT7 | BIT8)) === 0;
+    const hasParentYKey = canCopyParentInfo ? readVarUint(decoder) === 1 : false;
     /**
-     * @param {L} left
-     * @param {R} right
+     * If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
+     * and we read the next string as parentYKey.
+     * It indicates how we store/retrieve parent from `y.share`
+     * @type {string|null}
      */
-    constructor (left, right) {
-      this.left = left;
-      this.right = right;
-    }
-  }
+    const parentYKey = canCopyParentInfo && hasParentYKey ? readVarString(decoder) : null;
 
-  /**
-   * @template L,R
-   * @param {L} left
-   * @param {R} right
-   * @return {Pair<L,R>}
-   */
-  const create$4 = (left, right) => new Pair(left, right);
-
-  /**
-   * @template L,R
-   * @param {Array<Pair<L,R>>} arr
-   * @param {function(L, R):any} f
-   */
-  const forEach$1 = (arr, f) => arr.forEach(p => f(p.left, p.right));
-
-  /* eslint-env browser */
-
-  /* istanbul ignore next */
-  /**
-   * @type {Document}
-   */
-  const doc = /** @type {Document} */ (typeof document !== 'undefined' ? document : {});
-
-  /**
-   * @param {string} name
-   * @return {HTMLElement}
-   */
-  /* istanbul ignore next */
-  const createElement = name => doc.createElement(name);
-
-  /**
-   * @return {DocumentFragment}
-   */
-  /* istanbul ignore next */
-  const createDocumentFragment = () => doc.createDocumentFragment();
-
-  /**
-   * @param {string} text
-   * @return {Text}
-   */
-  /* istanbul ignore next */
-  const createTextNode = text => doc.createTextNode(text);
-
-  /* istanbul ignore next */
-  const domParser = /** @type {DOMParser} */ (typeof DOMParser !== 'undefined' ? new DOMParser() : null);
-
-  /**
-   * @param {Element} el
-   * @param {Array<pair.Pair<string,string|boolean>>} attrs Array of key-value pairs
-   * @return {Element}
-   */
-  /* istanbul ignore next */
-  const setAttributes = (el, attrs) => {
-    forEach$1(attrs, (key, value) => {
-      if (value === false) {
-        el.removeAttribute(key);
-      } else if (value === true) {
-        el.setAttribute(key, '');
-      } else {
-        // @ts-ignore
-        el.setAttribute(key, value);
-      }
-    });
-    return el
+    return new Item(
+      id, null, origin, null, rightOrigin,
+      canCopyParentInfo && !hasParentYKey ? readID(decoder) : (parentYKey !== null ? doc.get(parentYKey) : null), // parent
+      canCopyParentInfo && (info & BIT6) === BIT6 ? readVarString(decoder) : null, // parentSub
+      /** @type {AbstractContent} */ (readItemContent(decoder, info)) // item content
+    )
   };
-
-  /**
-   * @param {Array<Node>|HTMLCollection} children
-   * @return {DocumentFragment}
-   */
-  /* istanbul ignore next */
-  const fragment = children => {
-    const fragment = createDocumentFragment();
-    for (let i = 0; i < children.length; i++) {
-      fragment.appendChild(children[i]);
-    }
-    return fragment
-  };
-
-  /**
-   * @param {Element} parent
-   * @param {Array<Node>} nodes
-   * @return {Element}
-   */
-  /* istanbul ignore next */
-  const append = (parent, nodes) => {
-    parent.appendChild(fragment(nodes));
-    return parent
-  };
-
-  /**
-   * @param {EventTarget} el
-   * @param {string} name
-   * @param {EventListener} f
-   */
-  /* istanbul ignore next */
-  const addEventListener = (el, name, f) => el.addEventListener(name, f);
-
-  /**
-   * @param {string} name
-   * @param {Array<pair.Pair<string,string>|pair.Pair<string,boolean>>} attrs Array of key-value pairs
-   * @param {Array<Node>} children
-   * @return {Element}
-   */
-  /* istanbul ignore next */
-  const element = (name, attrs = [], children = []) =>
-    append(setAttributes(createElement(name), attrs), children);
-
-  /**
-   * @param {string} t
-   * @return {Text}
-   */
-  /* istanbul ignore next */
-  const text = createTextNode;
-
-  /**
-   * @param {Map<string,string>} m
-   * @return {string}
-   */
-  /* istanbul ignore next */
-  const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
-
-  /**
-   * JSON utility functions.
-   *
-   * @module json
-   */
-
-  /**
-   * Transform JavaScript object to JSON.
-   *
-   * @param {any} object
-   * @return {string}
-   */
-  const stringify = JSON.stringify;
-
-  /* global requestIdleCallback, requestAnimationFrame, cancelIdleCallback, cancelAnimationFrame */
-
-  /**
-   * Utility module to work with EcmaScript's event loop.
-   *
-   * @module eventloop
-   */
-
-  /**
-   * @type {Array<function>}
-   */
-  let queue = [];
-
-  const _runQueue = () => {
-    for (let i = 0; i < queue.length; i++) {
-      queue[i]();
-    }
-    queue = [];
-  };
-
-  /**
-   * @param {function():void} f
-   */
-  const enqueue = f => {
-    queue.push(f);
-    if (queue.length === 1) {
-      setTimeout(_runQueue, 0);
-    }
-  };
-
-  /**
-   * Isomorphic logging module with support for colors!
-   *
-   * @module logging
-   */
-
-  const BOLD = create$3();
-  const UNBOLD = create$3();
-  const BLUE = create$3();
-  const GREY = create$3();
-  const GREEN = create$3();
-  const RED = create$3();
-  const PURPLE = create$3();
-  const ORANGE = create$3();
-  const UNCOLOR = create$3();
-
-  /**
-   * @type {Object<Symbol,pair.Pair<string,string>>}
-   */
-  const _browserStyleMap = {
-    [BOLD]: create$4('font-weight', 'bold'),
-    [UNBOLD]: create$4('font-weight', 'normal'),
-    [BLUE]: create$4('color', 'blue'),
-    [GREEN]: create$4('color', 'green'),
-    [GREY]: create$4('color', 'grey'),
-    [RED]: create$4('color', 'red'),
-    [PURPLE]: create$4('color', 'purple'),
-    [ORANGE]: create$4('color', 'orange'), // not well supported in chrome when debugging node with inspector - TODO: deprecate
-    [UNCOLOR]: create$4('color', 'black')
-  };
-
-  const _nodeStyleMap = {
-    [BOLD]: '\u001b[1m',
-    [UNBOLD]: '\u001b[2m',
-    [BLUE]: '\x1b[34m',
-    [GREEN]: '\x1b[32m',
-    [GREY]: '\u001b[37m',
-    [RED]: '\x1b[31m',
-    [PURPLE]: '\x1b[35m',
-    [ORANGE]: '\x1b[38;5;208m',
-    [UNCOLOR]: '\x1b[0m'
-  };
-
-  /* istanbul ignore next */
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<string|object|number>}
-   */
-  const computeBrowserLoggingArgs = args => {
-    const strBuilder = [];
-    const styles = [];
-    const currentStyle = create();
-    /**
-     * @type {Array<string|Object|number>}
-     */
-    let logArgs = [];
-    // try with formatting until we find something unsupported
-    let i = 0;
-
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      // @ts-ignore
-      const style = _browserStyleMap[arg];
-      if (style !== undefined) {
-        currentStyle.set(style.left, style.right);
-      } else {
-        if (arg.constructor === String || arg.constructor === Number) {
-          const style = mapToStyleString(currentStyle);
-          if (i > 0 || style.length > 0) {
-            strBuilder.push('%c' + arg);
-            styles.push(style);
-          } else {
-            strBuilder.push(arg);
-          }
-        } else {
-          break
-        }
-      }
-    }
-
-    if (i > 0) {
-      // create logArgs with what we have so far
-      logArgs = styles;
-      logArgs.unshift(strBuilder.join(''));
-    }
-    // append the rest
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      if (!(arg instanceof Symbol)) {
-        logArgs.push(arg);
-      }
-    }
-    return logArgs
-  };
-
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<string|object|number>}
-   */
-  const computeNodeLoggingArgs = args => {
-    const strBuilder = [];
-    const logArgs = [];
-
-    // try with formatting until we find something unsupported
-    let i = 0;
-
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      // @ts-ignore
-      const style = _nodeStyleMap[arg];
-      if (style !== undefined) {
-        strBuilder.push(style);
-      } else {
-        if (arg.constructor === String || arg.constructor === Number) {
-          strBuilder.push(arg);
-        } else {
-          break
-        }
-      }
-    }
-    if (i > 0) {
-      // create logArgs with what we have so far
-      strBuilder.push('\x1b[0m');
-      logArgs.push(strBuilder.join(''));
-    }
-    // append the rest
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      /* istanbul ignore else */
-      if (!(arg instanceof Symbol)) {
-        logArgs.push(arg);
-      }
-    }
-    return logArgs
-  };
-
-  /* istanbul ignore next */
-  const computeLoggingArgs = isNode ? computeNodeLoggingArgs : computeBrowserLoggingArgs;
-
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   */
-  const print = (...args) => {
-    console.log(...computeLoggingArgs(args));
-    /* istanbul ignore next */
-    vconsoles.forEach(vc => vc.print(args));
-  };
-
-  /* istanbul ignore next */
-  /**
-   * @param {Error} err
-   */
-  const printError = err => {
-    console.error(err);
-    vconsoles.forEach(vc => vc.printError(err));
-  };
-
-  /* istanbul ignore next */
-  /**
-   * @param {string} url image location
-   * @param {number} height height of the image in pixel
-   */
-  const printImg = (url, height) => {
-    if (isBrowser) {
-      console.log('%c                      ', `font-size: ${height}px; background-size: contain; background-repeat: no-repeat; background-image: url(${url})`);
-      // console.log('%c                ', `font-size: ${height}x; background: url(${url}) no-repeat;`)
-    }
-    vconsoles.forEach(vc => vc.printImg(url, height));
-  };
-
-  /* istanbul ignore next */
-  /**
-   * @param {string} base64
-   * @param {number} height
-   */
-  const printImgBase64 = (base64, height) => printImg(`data:image/gif;base64,${base64}`, height);
-
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   */
-  const group = (...args) => {
-    console.group(...computeLoggingArgs(args));
-    /* istanbul ignore next */
-    vconsoles.forEach(vc => vc.group(args));
-  };
-
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   */
-  const groupCollapsed = (...args) => {
-    console.groupCollapsed(...computeLoggingArgs(args));
-    /* istanbul ignore next */
-    vconsoles.forEach(vc => vc.groupCollapsed(args));
-  };
-
-  const groupEnd = () => {
-    console.groupEnd();
-    /* istanbul ignore next */
-    vconsoles.forEach(vc => vc.groupEnd());
-  };
-
-  const vconsoles = new Set();
-
-  /* istanbul ignore next */
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<Element>}
-   */
-  const _computeLineSpans = args => {
-    const spans = [];
-    const currentStyle = new Map();
-    // try with formatting until we find something unsupported
-    let i = 0;
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      // @ts-ignore
-      const style = _browserStyleMap[arg];
-      if (style !== undefined) {
-        currentStyle.set(style.left, style.right);
-      } else {
-        if (arg.constructor === String || arg.constructor === Number) {
-          // @ts-ignore
-          const span = element('span', [create$4('style', mapToStyleString(currentStyle))], [text(arg)]);
-          if (span.innerHTML === '') {
-            span.innerHTML = '&nbsp;';
-          }
-          spans.push(span);
-        } else {
-          break
-        }
-      }
-    }
-    // append the rest
-    for (; i < args.length; i++) {
-      let content = args[i];
-      if (!(content instanceof Symbol)) {
-        if (content.constructor !== String && content.constructor !== Number) {
-          content = ' ' + stringify(content) + ' ';
-        }
-        spans.push(element('span', [], [text(/** @type {string} */ (content))]));
-      }
-    }
-    return spans
-  };
-
-  const lineStyle = 'font-family:monospace;border-bottom:1px solid #e2e2e2;padding:2px;';
-
-  /* istanbul ignore next */
-  class VConsole {
-    /**
-     * @param {Element} dom
-     */
-    constructor (dom) {
-      this.dom = dom;
-      /**
-       * @type {Element}
-       */
-      this.ccontainer = this.dom;
-      this.depth = 0;
-      vconsoles.add(this);
-    }
-
-    /**
-     * @param {Array<string|Symbol|Object|number>} args
-     * @param {boolean} collapsed
-     */
-    group (args, collapsed = false) {
-      enqueue(() => {
-        const triangleDown = element('span', [create$4('hidden', collapsed), create$4('style', 'color:grey;font-size:120%;')], [text('▼')]);
-        const triangleRight = element('span', [create$4('hidden', !collapsed), create$4('style', 'color:grey;font-size:125%;')], [text('▶')]);
-        const content = element('div', [create$4('style', `${lineStyle};padding-left:${this.depth * 10}px`)], [triangleDown, triangleRight, text(' ')].concat(_computeLineSpans(args)));
-        const nextContainer = element('div', [create$4('hidden', collapsed)]);
-        const nextLine = element('div', [], [content, nextContainer]);
-        append(this.ccontainer, [nextLine]);
-        this.ccontainer = nextContainer;
-        this.depth++;
-        // when header is clicked, collapse/uncollapse container
-        addEventListener(content, 'click', event => {
-          nextContainer.toggleAttribute('hidden');
-          triangleDown.toggleAttribute('hidden');
-          triangleRight.toggleAttribute('hidden');
-        });
-      });
-    }
-
-    /**
-     * @param {Array<string|Symbol|Object|number>} args
-     */
-    groupCollapsed (args) {
-      this.group(args, true);
-    }
-
-    groupEnd () {
-      enqueue(() => {
-        if (this.depth > 0) {
-          this.depth--;
-          // @ts-ignore
-          this.ccontainer = this.ccontainer.parentElement.parentElement;
-        }
-      });
-    }
-
-    /**
-     * @param {Array<string|Symbol|Object|number>} args
-     */
-    print (args) {
-      enqueue(() => {
-        append(this.ccontainer, [element('div', [create$4('style', `${lineStyle};padding-left:${this.depth * 10}px`)], _computeLineSpans(args))]);
-      });
-    }
-
-    /**
-     * @param {Error} err
-     */
-    printError (err) {
-      this.print([RED, BOLD, err.toString()]);
-    }
-
-    /**
-     * @param {string} url
-     * @param {number} height
-     */
-    printImg (url, height) {
-      enqueue(() => {
-        append(this.ccontainer, [element('img', [create$4('src', url), create$4('height', `${round(height * 1.5)}px`)])]);
-      });
-    }
-
-    /**
-     * @param {Node} node
-     */
-    printDom (node) {
-      enqueue(() => {
-        append(this.ccontainer, [node]);
-      });
-    }
-
-    destroy () {
-      enqueue(() => {
-        vconsoles.delete(this);
-      });
-    }
-  }
-
-  /* istanbul ignore next */
-  /**
-   * @param {Element} dom
-   */
-  const createVConsole = dom => new VConsole(dom);
 
   /**
    * @module prng
@@ -9179,6 +9421,16 @@
   const bool = gen => (gen.next() >= 0.5);
 
   /**
+   * Generates a random integer with 32 bit resolution.
+   *
+   * @param {PRNG} gen A random number generator.
+   * @param {Number} min The lower bound of the allowed return values (inclusive).
+   * @param {Number} max The upper bound of the allowed return values (inclusive).
+   * @return {Number} A random integer on [min, max]
+   */
+  const int32 = (gen, min, max) => floor(gen.next() * (max + 1 - min) + min);
+
+  /**
    * Optimized version of prng.int32. It has the same precision as prng.int32, but should be preferred when
    * openaring on smaller ranges.
    *
@@ -9191,6 +9443,27 @@
     const _min = min$1 & BITS31;
     const _max = max & BITS31;
     return floor(gen.next() * (min(_max - _min + 1, BITS31) & BITS31) + _min)
+  };
+
+  /**
+   * @param {PRNG} gen
+   * @return {string} A single letter (a-z)
+   */
+  const letter = gen => fromCharCode(int31(gen, 97, 122));
+
+  /**
+   * @param {PRNG} gen
+   * @param {number} [minLen=0]
+   * @param {number} [maxLen=20]
+   * @return {string} A random word (0-20 characters) without spaces consisting of letters (a-z)
+   */
+  const word = (gen, minLen = 0, maxLen = 20) => {
+    const len = int31(gen, minLen, maxLen);
+    let str = '';
+    for (let i = 0; i < len; i++) {
+      str += letter(gen);
+    }
+    return str
   };
 
   /**
@@ -9444,6 +9717,39 @@
    * @param {string} info
    */
   const describe = (description, info = '') => print(BLUE, description, ' ', GREY, info);
+
+  /**
+   * Measure the time that it takes to calculate something.
+   *
+   * ```js
+   * export const testMyFirstTest = tc => {
+   *   t.measureTime('measurement', () => {
+   *     heavyCalculation()
+   *   })
+   *   t.group('async measurement', async () => {
+   *     await heavyAsyncCalculation()
+   *   })
+   * }
+   * ```
+   *
+   * @param {string} message
+   * @param {function():void|Promise<undefined>} f
+   */
+  const measureTime = async (message, f) => {
+    let duration = 0;
+    let iterations = 0;
+    const start = performance$1.now();
+    while (duration < 5) {
+      const p = f();
+      if (p) {
+        await p;
+      }
+      duration = performance$1.now() - start;
+      iterations++;
+    }
+    const iterationsInfo = iterations > 1 ? `, ${iterations} repititions` : '';
+    print(PURPLE, message, GREY, ` ${humanizeDuration(duration / iterations)}${iterationsInfo}`);
+  };
 
   /**
    * @template T
@@ -10114,6 +10420,7 @@
           s1.constructor !== s2.constructor ||
           !compareIDs(s1.id, s2.id) ||
           s1.deleted !== s2.deleted ||
+          // @ts-ignore
           s1.length !== s2.length
         ) {
           fail('Structs dont match');
@@ -10222,6 +10529,7 @@
     writeDeleteSet: writeDeleteSet,
     readDeleteSet: readDeleteSet,
     readAndApplyDeleteSet: readAndApplyDeleteSet,
+    generateNewClientId: generateNewClientId,
     Doc: Doc,
     writeClientsStructs: writeClientsStructs,
     readClientsStructRefs: readClientsStructRefs,
@@ -10293,6 +10601,7 @@
     transact: transact,
     UndoManager: UndoManager,
     YEvent: YEvent,
+    getTypeChildren: getTypeChildren,
     callTypeObservers: callTypeObservers,
     AbstractType: AbstractType,
     typeListToArray: typeListToArray,
@@ -10321,6 +10630,7 @@
     ItemListPosition: ItemListPosition,
     ItemTextListPosition: ItemTextListPosition,
     ItemInsertionResult: ItemInsertionResult,
+    cleanupYTextFormatting: cleanupYTextFormatting,
     YTextEvent: YTextEvent,
     YText: YText,
     readYText: readYText,
@@ -10335,10 +10645,8 @@
     YXmlText: YXmlText,
     readYXmlText: readYXmlText,
     AbstractStruct: AbstractStruct,
-    AbstractStructRef: AbstractStructRef,
     structGCRefNumber: structGCRefNumber,
     GC: GC,
-    GCRef: GCRef,
     ContentBinary: ContentBinary,
     readContentBinary: readContentBinary,
     ContentDeleted: ContentDeleted,
@@ -10370,7 +10678,7 @@
     Item: Item,
     contentRefs: contentRefs,
     AbstractContent: AbstractContent,
-    ItemRef: ItemRef
+    readItem: readItem
   });
 
   /**
@@ -10902,6 +11210,33 @@
   /**
    * @param {t.TestCase} tc
    */
+  const testMapHavingIterableAsConstructorParamTests = tc => {
+    const { map0 } = init(tc, { users: 1 });
+
+    const m1 = new YMap(Object.entries({ number: 1, string: 'hello' }));
+    map0.set('m1', m1);
+    assert(m1.get('number') === 1);
+    assert(m1.get('string') === 'hello');
+
+    const m2 = new YMap([
+      ['object', { x: 1 }],
+      ['boolean', true]
+    ]);
+    map0.set('m2', m2);
+    assert(m2.get('object').x === 1);
+    assert(m2.get('boolean') === true);
+
+    const m3 = new YMap([...m1, ...m2]);
+    map0.set('m3', m3);
+    assert(m3.get('number') === 1);
+    assert(m3.get('string') === 'hello');
+    assert(m3.get('object').x === 1);
+    assert(m3.get('boolean') === true);
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
   const testBasicMapTests = tc => {
     const { testConnector, users, map0, map1, map2 } = init(tc, { users: 3 });
     users[2].disconnect();
@@ -10924,6 +11259,7 @@
     assert(map0.get('boolean1') === true, 'client 0 computed the change (boolean)');
     compare(map0.get('object'), { key: { key2: 'value' } }, 'client 0 computed the change (object)');
     assert(map0.get('y-map').get('y-array').get(0) === -1, 'client 0 computed the change (type)');
+    assert(map0.size === 6, 'client 0 map has correct size');
 
     users[2].connect();
     testConnector.flushAllMessages();
@@ -10934,6 +11270,7 @@
     assert(map1.get('boolean1') === true, 'client 1 computed the change (boolean)');
     compare(map1.get('object'), { key: { key2: 'value' } }, 'client 1 received the update (object)');
     assert(map1.get('y-map').get('y-array').get(0) === -1, 'client 1 received the update (type)');
+    assert(map1.size === 6, 'client 1 map has correct size');
 
     // compare disconnected user
     assert(map2.get('number') === 1, 'client 2 received the update (number) - was disconnected');
@@ -11019,6 +11356,20 @@
       compare(u.get('stuff'), 'c1');
     }
     compare$1(users);
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testSizeAndDeleteOfMapProperty = tc => {
+    const { map0 } = init(tc, { users: 1 });
+    map0.set('stuff', 'c0');
+    map0.set('otherstuff', 'c1');
+    assert(map0.size === 2, `map size is ${map0.size} expected 2`);
+    map0.delete('stuff');
+    assert(map0.size === 1, `map size after delete is ${map0.size}, expected 1`);
+    map0.delete('otherstuff');
+    assert(map0.size === 0, `map size after delete is ${map0.size}, expected 0`);
   };
 
   /**
@@ -11345,7 +11696,7 @@
    * @param {t.TestCase} tc
    */
   const testRepeatGeneratingYmapTests10 = tc => {
-    applyRandomTests(tc, mapTransactions, 10);
+    applyRandomTests(tc, mapTransactions, 3);
   };
 
   /**
@@ -11458,12 +11809,14 @@
 
   var map$2 = /*#__PURE__*/Object.freeze({
     __proto__: null,
+    testMapHavingIterableAsConstructorParamTests: testMapHavingIterableAsConstructorParamTests,
     testBasicMapTests: testBasicMapTests,
     testGetAndSetOfMapProperty: testGetAndSetOfMapProperty,
     testYmapSetsYmap: testYmapSetsYmap,
     testYmapSetsYarray: testYmapSetsYarray,
     testGetAndSetOfMapPropertySyncs: testGetAndSetOfMapPropertySyncs,
     testGetAndSetOfMapPropertyWithConflict: testGetAndSetOfMapPropertyWithConflict,
+    testSizeAndDeleteOfMapProperty: testSizeAndDeleteOfMapProperty,
     testGetAndSetAndDeleteOfMapProperty: testGetAndSetAndDeleteOfMapProperty,
     testGetAndSetOfMapPropertyWithThreeConflicts: testGetAndSetOfMapPropertyWithThreeConflicts,
     testGetAndSetAndDeleteOfMapPropertyWithThreeConflicts: testGetAndSetAndDeleteOfMapPropertyWithThreeConflicts,
@@ -11673,6 +12026,229 @@
     compare(delta0, [{ insert: 'a', attributes: { bold: true } }, { insert: { image: 'imageSrc.png' } }, { insert: 'b', attributes: { bold: true } }], 'toDelta does not set attributes key when no attributes are present');
   };
 
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testFormattingRemoved = tc => {
+    const { text0 } = init$1(tc, { users: 1 });
+    text0.insert(0, 'ab', { bold: true });
+    text0.delete(0, 2);
+    assert(getTypeChildren(text0).length === 1);
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testFormattingRemovedInMidText = tc => {
+    const { text0 } = init$1(tc, { users: 1 });
+    text0.insert(0, '1234');
+    text0.insert(2, 'ab', { bold: true });
+    text0.delete(2, 2);
+    assert(getTypeChildren(text0).length === 3);
+  };
+
+  const tryGc$1 = () => {
+    if (typeof global !== 'undefined' && global.gc) {
+      global.gc();
+    }
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testLargeFragmentedDocument = tc => {
+    const itemsToInsert = 2000000;
+    let update = /** @type {any} */ (null)
+    ;(() => {
+      const doc1 = new Doc();
+      const text0 = doc1.getText('txt');
+      tryGc$1();
+      measureTime(`time to insert ${itemsToInsert} items`, () => {
+        doc1.transact(() => {
+          for (let i = 0; i < itemsToInsert; i++) {
+            text0.insert(0, '0');
+          }
+        });
+      });
+      tryGc$1();
+      measureTime('time to encode document', () => {
+        update = encodeStateAsUpdate(doc1);
+      });
+    })()
+    ;(() => {
+      const doc2 = new Doc();
+      tryGc$1();
+      measureTime(`time to apply ${itemsToInsert} updates`, () => {
+        applyUpdate(doc2, update);
+      });
+    })();
+  };
+
+  // RANDOM TESTS
+
+  let charCounter = 0;
+
+  const marks = [
+    { bold: true },
+    { italic: true },
+    { italic: true, color: '#888' }
+  ];
+
+  const marksChoices = [
+    undefined,
+    ...marks
+  ];
+
+  /**
+   * @type Array<function(any,prng.PRNG):void>
+   */
+  const qChanges = [
+    /**
+     * @param {Y.Doc} y
+     * @param {prng.PRNG} gen
+     */
+    (y, gen) => { // insert text
+      const ytext = y.getText('text');
+      const insertPos = int32(gen, 0, ytext.toString().length);
+      const attrs = oneOf(gen, marksChoices);
+      const text = charCounter++ + word(gen);
+      ytext.insert(insertPos, text, attrs);
+    },
+    /**
+     * @param {Y.Doc} y
+     * @param {prng.PRNG} gen
+     */
+    (y, gen) => { // insert embed
+      const ytext = y.getText('text');
+      const insertPos = int32(gen, 0, ytext.toString().length);
+      ytext.insertEmbed(insertPos, { image: 'https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png' });
+    },
+    /**
+     * @param {Y.Doc} y
+     * @param {prng.PRNG} gen
+     */
+    (y, gen) => { // delete text
+      const ytext = y.getText('text');
+      const contentLen = ytext.toString().length;
+      const insertPos = int32(gen, 0, contentLen);
+      const overwrite = min(int32(gen, 0, contentLen - insertPos), 2);
+      ytext.delete(insertPos, overwrite);
+    },
+    /**
+     * @param {Y.Doc} y
+     * @param {prng.PRNG} gen
+     */
+    (y, gen) => { // format text
+      const ytext = y.getText('text');
+      const contentLen = ytext.toString().length;
+      const insertPos = int32(gen, 0, contentLen);
+      const overwrite = min(int32(gen, 0, contentLen - insertPos), 2);
+      const format = oneOf(gen, marks);
+      ytext.format(insertPos, overwrite, format);
+    },
+    /**
+     * @param {Y.Doc} y
+     * @param {prng.PRNG} gen
+     */
+    (y, gen) => { // insert codeblock
+      const ytext = y.getText('text');
+      const insertPos = int32(gen, 0, ytext.toString().length);
+      const text = charCounter++ + word(gen);
+      const ops = [];
+      if (insertPos > 0) {
+        ops.push({ retain: insertPos });
+      }
+      ops.push({ insert: text }, { insert: '\n', format: { 'code-block': true } });
+      ytext.applyDelta(ops);
+    }
+  ];
+
+  /**
+   * @param {any} result
+   */
+  const checkResult = result => {
+    for (let i = 1; i < result.testObjects.length; i++) {
+      const p1 = result.users[i].getText('text').toDelta();
+      const p2 = result.users[i].getText('text').toDelta();
+      compare(p1, p2);
+    }
+    // Uncomment this to find formatting-cleanup issues
+    // const cleanups = Y.cleanupYTextFormatting(result.users[0].getText('text'))
+    // t.assert(cleanups === 0)
+    return result
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges1 = tc => {
+    const { users } = checkResult(applyRandomTests(tc, qChanges, 1));
+    const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+    assert(cleanups === 0);
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges2 = tc => {
+    const { users } = checkResult(applyRandomTests(tc, qChanges, 2));
+    const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+    assert(cleanups === 0);
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges2Repeat = tc => {
+    for (let i = 0; i < 1000; i++) {
+      const { users } = checkResult(applyRandomTests(tc, qChanges, 2));
+      const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+      assert(cleanups === 0);
+    }
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges3 = tc => {
+    checkResult(applyRandomTests(tc, qChanges, 3));
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges30 = tc => {
+    checkResult(applyRandomTests(tc, qChanges, 30));
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges40 = tc => {
+    checkResult(applyRandomTests(tc, qChanges, 40));
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges70 = tc => {
+    checkResult(applyRandomTests(tc, qChanges, 70));
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges100 = tc => {
+    checkResult(applyRandomTests(tc, qChanges, 100));
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testRepeatGenerateQuillChanges300 = tc => {
+    checkResult(applyRandomTests(tc, qChanges, 300));
+  };
+
   var text$1 = /*#__PURE__*/Object.freeze({
     __proto__: null,
     testBasicInsertAndDelete: testBasicInsertAndDelete,
@@ -11682,7 +12258,19 @@
     testSnapshotDeleteAfter: testSnapshotDeleteAfter,
     testToJson: testToJson,
     testToDeltaEmbedAttributes: testToDeltaEmbedAttributes,
-    testToDeltaEmbedNoAttributes: testToDeltaEmbedNoAttributes
+    testToDeltaEmbedNoAttributes: testToDeltaEmbedNoAttributes,
+    testFormattingRemoved: testFormattingRemoved,
+    testFormattingRemovedInMidText: testFormattingRemovedInMidText,
+    testLargeFragmentedDocument: testLargeFragmentedDocument,
+    testRepeatGenerateQuillChanges1: testRepeatGenerateQuillChanges1,
+    testRepeatGenerateQuillChanges2: testRepeatGenerateQuillChanges2,
+    testRepeatGenerateQuillChanges2Repeat: testRepeatGenerateQuillChanges2Repeat,
+    testRepeatGenerateQuillChanges3: testRepeatGenerateQuillChanges3,
+    testRepeatGenerateQuillChanges30: testRepeatGenerateQuillChanges30,
+    testRepeatGenerateQuillChanges40: testRepeatGenerateQuillChanges40,
+    testRepeatGenerateQuillChanges70: testRepeatGenerateQuillChanges70,
+    testRepeatGenerateQuillChanges100: testRepeatGenerateQuillChanges100,
+    testRepeatGenerateQuillChanges300: testRepeatGenerateQuillChanges300
   });
 
   /**
@@ -12035,11 +12623,74 @@
     testUndoDeleteFilter: testUndoDeleteFilter
   });
 
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testArrayCompatibilityV1 = tc => {
+    const oldDoc = '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';
+    const oldVal = JSON.parse('[[1,2,3,4],472,472,{"someprop":44},472,[1,2,3,4],{"someprop":44},[1,2,3,4],[1,2,3,4],[1,2,3,4],{"someprop":44},449,448,[1,2,3,4],[1,2,3,4],{"someprop":44},452,{"someprop":44},[1,2,3,4],[1,2,3,4],[1,2,3,4],[1,2,3,4],452,[1,2,3,4],497,{"someprop":44},497,497,497,{"someprop":44},[1,2,3,4],522,522,452,470,{"someprop":44},[1,2,3,4],453,{"someprop":44},480,480,480,508,508,508,[1,2,3,4],[1,2,3,4],502,492,492,453,{"someprop":44},496,496,496,[1,2,3,4],496,493,495,495,495,495,493,[1,2,3,4],493,493,453,{"someprop":44},{"someprop":44},505,505,517,517,505,[1,2,3,4],{"someprop":44},509,{"someprop":44},521,521,521,509,477,{"someprop":44},{"someprop":44},485,485,{"someprop":44},515,{"someprop":44},451,{"someprop":44},[1,2,3,4],516,516,516,516,{"someprop":44},499,499,469,469,[1,2,3,4],[1,2,3,4],512,512,512,{"someprop":44},454,487,487,487,[1,2,3,4],[1,2,3,4],454,[1,2,3,4],[1,2,3,4],{"someprop":44},[1,2,3,4],459,[1,2,3,4],513,459,{"someprop":44},[1,2,3,4],482,{"someprop":44},[1,2,3,4],[1,2,3,4],459,[1,2,3,4],{"someprop":44},[1,2,3,4],484,454,510,510,510,510,468,{"someprop":44},468,[1,2,3,4],[1,2,3,4],[1,2,3,4],[1,2,3,4],467,[1,2,3,4],467,486,486,486,[1,2,3,4],489,451,[1,2,3,4],{"someprop":44},[1,2,3,4],[1,2,3,4],{"someprop":44},{"someprop":44},483,[1,2,3,4],{"someprop":44},{"someprop":44},{"someprop":44},{"someprop":44},519,519,519,519,506,506,[1,2,3,4],{"someprop":44},464,{"someprop":44},481,481,[1,2,3,4],{"someprop":44},[1,2,3,4],464,475,475,475,463,{"someprop":44},[1,2,3,4],518,[1,2,3,4],[1,2,3,4],463,455,498,498,498,466,471,471,471,501,[1,2,3,4],501,501,476,{"someprop":44},466,[1,2,3,4],{"someprop":44},503,503,503,466,455,490,474,{"someprop":44},457,494,494,{"someprop":44},457,479,{"someprop":44},[1,2,3,4],500,500,500,{"someprop":44},[1,2,3,4],[1,2,3,4],{"someprop":44},{"someprop":44},{"someprop":44},[1,2,3,4],[1,2,3,4],{"someprop":44},[1,2,3,4],[1,2,3,4],[1,2,3,4],[1,2,3],491,491,[1,2,3,4],504,504,504,504,465,[1,2,3,4],{"someprop":44},460,{"someprop":44},488,488,488,[1,2,3,4],[1,2,3,4],{"someprop":44},{"someprop":44},514,514,514,514,{"someprop":44},{"someprop":44},{"someprop":44},458,[1,2,3,4],[1,2,3,4],462,[1,2,3,4],[1,2,3,4],{"someprop":44},462,{"someprop":44},[1,2,3,4],{"someprop":44},[1,2,3,4],507,{"someprop":44},{"someprop":44},507,507,{"someprop":44},{"someprop":44},[1,2,3,4],{"someprop":44},461,{"someprop":44},473,461,[1,2,3,4],461,511,511,461,{"someprop":44},{"someprop":44},520,520,520,[1,2,3,4],458]');
+    const doc = new Doc();
+    applyUpdate(doc, fromBase64(oldDoc));
+    compare(doc.getArray('array').toJSON(), oldVal);
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testMapDecodingCompatibilityV1 = tc => {
+    const oldDoc = 'BVcEAKEBAAGhAwEBAAShBAABAAGhBAECoQEKAgAEoQQLAQAEoQMcAaEEFQGhAiECAAShAS4BoQQYAaEEHgGhBB8BoQQdAQABoQQhAaEEIAGhBCMBAAGhBCUCoQQkAqEEKAEABKEEKgGhBCsBoQQwAQABoQQxAaEEMgGhBDQBAAGhBDYBoQQ1AQAEoQQ5AQABoQQ4AQAEoQM6AQAEoQRFAaEESgEAAaEESwEABKEETQGhBEABoQRSAgABoQRTAgAEoQRVAgABoQReAaEEWAEABKEEYAEAAaEEZgKhBGECAAShBGsBAAGhAaUBAgAEoQRwAgABoQRzAQAEoQR5AQABoQSAAQEABKEEggEBAAGhBIcBAwABoQGzAQEAAaEEjQECpwHMAQAIAASRAQR9AX0CfQN9BGcDACEBA21hcAN0d28BoQMAAQAEoQMBAQABoQMGAQAEIQEDbWFwA29uZQOhBAEBAAShAw8CoQMQAaEDFgEAAaEDFwEAAaEDGAGhAxwBAAGhAx0BoQIaBAAEoQMjAgABoQMpAQABoQMfAQABoQMrAQABoQMvAaEDLQEAAaEDMQIABKEDNQGhAzIBoQM6AaEDPAGhBCMBAAGhAU8BAAGhA0ADoQJCAQABoQNEAgABoQNFAgAEoQJEAQABoQNLAaEEQAEABKEESgEAAaEDWAGhA1MBAAGhA1oBAAGhA10DoQNbAQABoQNhAwABoQNiAQAEoQNmAaEDaAWhA20BAAShA3IBAAGhA3MBAAShA3gBoQN6A6EDfwEAAaEDgwEBAAShA4UBAgABoQOLAQGhA4IBAaEDjQEBoQOOAQEAAaEDjwEBAAShA5ABAaEDkgEBoQOXAQEABKEDmQEBAAGhA5gBAQABoQOgAQEAAaEDngEBaQIAIQEDbWFwA3R3bwGhAwABoQEAAQABoQIBAQAEoQIEAaEDAQKhAQwDAAShAg4BAAShAhMBoQQJBAABoQQVAQABoQIeAaECHAGhBBgBAAShAiICAAShBB4BAAShBB8BAAGhAzwBAAGhBCMCoQM9AqEDPgEAAaECOQEABKECPAGhAkEBAAGhAjoBAAGhAkIBAAShAkQBAAShAksBAAGhA0UCAAShAlMCoQJQAQAEoQJZAaECWgEAAaECYAKhAl8BAAShAmMCAAGhAmoBoQJkAgAEoQRSAQABoQJzAQAEoQRTAQAEoQJ6AQAEoQJ1AQABoQKEAQEABKEChgEBoQJ/AgABoQKLAQEABKECjwECAAGhApUBAQABoQKXAQGhAo0BAQABoQKaAQGhApkBAQABoQKcAQEAAaECnwEBAAShAqEBAaECnQEBAAShAqYBAaECpwEBAAGhAqwBAQABoQKtAQEABKECrwECAAF5AQAhAQNtYXADb25lASEBA21hcAN0d28CAAGhAQABoQMAAaEBBAEAAaEBBQGhAQYBoQMPAaEEAQGhAQoBoQELAaEBDAEABKEBDgEAAaEBDQEABKEBFQEABKEDHAKhBBUBAAShASECAAShAScBoQQWAwAEoQIhAgABoQEvAaECIgEABKEBOAEAAaEBNwEAAaEBPwGhAzoBAAShAUIBoQQjAQABoQFIAQABoQFKAaEDPgEAAaECOgEAAaEBTwIAAaEBUgEAAaECQQGhAVQCoQFWAgABoQFYAQAEoQFcAqEBWgEAAaEBYgShAWMBAAGhAWgBAAGhAWkCAAGhAW4BAAGhAWsBAAShAXABAAShAXcCAAShAX0BAAShAYIBAaEBcgEAAaEBhwEBoQGIAQEABKEBigEBAAShAZABAQAEoQGLAQIABKEBlQEBAAShBGkEAAGhAagBAQAEoQRzAQABoQGvAQKhBHsBAAGhAbMBAgAEoQSAAQEAAaEBuwECAAGhAbYBAqEEiwEBAAShAcIBAQAEoQHHAQEABKEEkAEBpwHRAQEoAAHSAQdkZWVwa2V5AXcJZGVlcHZhbHVloQHMAQFiAAAhAQNtYXADb25lAwABoQACASEBA21hcAN0d28CAAShAAQBoQAGAaEACwEAAaEADQIABKEADAEABKEAEAEABKEAGgEABKEAHwEABKEAFQGhACQBAAGhACoBoQApAaEALAGhAC0BoQAuAaEALwEAAaEAMAIAAaEANAEABKEAMQEABKEANgEAAaEAQAIAAaEAOwGhAEMCAAShAEcBAAShAEwBoQBFAQAEoQBRAQAEoQBXAqEAUgEABKEAXgIAAaEAZAKhAF0BoQBnAqEAaAEABKEAawGhAGoCoQBwAQABoQBzAQAEoQB1AQABoQB6AaEAcgGhAHwBAAShAH4BoQB9AgABoQCFAQEABKEAhwEBAAShAIwBAaEAgwEBAAShAJIBAQAEoQCXAQIABKEAkQEBAAGhAJ0BAQAEoQCiAQEABKEApAECAAGhAK8BAqEAqQEBAAGhALMBAQABBQABALcBAQIA0gHUAQEEAQCRAQMBAKUBAgEAuQE=';
+    // eslint-disable-next-line
+    const oldVal = /** @type {any} */ ({"one":[1,2,3,4],"two":{"deepkey":"deepvalue"}});
+    const doc = new Doc();
+    applyUpdate(doc, fromBase64(oldDoc));
+    compare(doc.getMap('map').toJSON(), oldVal);
+  };
+
+  /**
+   * @param {t.TestCase} tc
+   */
+  const testTextDecodingCompatibilityV1 = tc => {
+    const oldDoc = 'BS8EAAUBBHRleHRveyJpbWFnZSI6Imh0dHBzOi8vdXNlci1pbWFnZXMuZ2l0aHVidXNlcmNvbnRlbnQuY29tLzU1NTM3NTcvNDg5NzUzMDctNjFlZmIxMDAtZjA2ZC0xMWU4LTkxNzctZWU4OTVlNTkxNmU1LnBuZyJ9RAQAATHBBAEEAAHBBAIEAAHEBAMEAAQxdXUKxQQCBANveyJpbWFnZSI6Imh0dHBzOi8vdXNlci1pbWFnZXMuZ2l0aHVidXNlcmNvbnRlbnQuY29tLzU1NTM3NTcvNDg5NzUzMDctNjFlZmIxMDAtZjA2ZC0xMWU4LTkxNzctZWU4OTVlNTkxNmU1LnBuZyJ9xQMJBAFveyJpbWFnZSI6Imh0dHBzOi8vdXNlci1pbWFnZXMuZ2l0aHVidXNlcmNvbnRlbnQuY29tLzU1NTM3NTcvNDg5NzUzMDctNjFlZmIxMDAtZjA2ZC0xMWU4LTkxNzctZWU4OTVlNTkxNmU1LnBuZyJ9xQMJBAlveyJpbWFnZSI6Imh0dHBzOi8vdXNlci1pbWFnZXMuZ2l0aHVidXNlcmNvbnRlbnQuY29tLzU1NTM3NTcvNDg5NzUzMDctNjFlZmIxMDAtZjA2ZC0xMWU4LTkxNzctZWU4OTVlNTkxNmU1LnBuZyJ9xgMBAwIGaXRhbGljBHRydWXGBAsDAgVjb2xvcgYiIzg4OCLEBAwDAgExxAQNAwIBMsEEDgMCAsYEEAMCBml0YWxpYwRudWxsxgQRAwIFY29sb3IEbnVsbMQDAQQLATHEBBMECwIyOcQEFQQLCzl6anpueXdvaHB4xAQgBAsIY25icmNhcQrBAxADEQHGAR8BIARib2xkBHRydWXGAgACAQRib2xkBG51bGzFAwkECm97ImltYWdlIjoiaHR0cHM6Ly91c2VyLWltYWdlcy5naXRodWJ1c2VyY29udGVudC5jb20vNTU1Mzc1Ny80ODk3NTMwNy02MWVmYjEwMC1mMDZkLTExZTgtOTE3Ny1lZTg5NWU1OTE2ZTUucG5nIn3GARABEQZpdGFsaWMEdHJ1ZcYELQERBWNvbG9yBiIjODg4IsYBEgETBml0YWxpYwRudWxsxgQvARMFY29sb3IEbnVsbMYCKwIsBGJvbGQEdHJ1ZcYCLQIuBGJvbGQEbnVsbMYCjAECjQEGaXRhbGlj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xgKbAQQOBml0YWxpYwR0cnVlxgKcAQQOBWNvbG9yBiIjODg4IsECaAI7AcQCCgEBFjEzMThqd3NramFiZG5kcmRsbWphZQrGA1UDVgRib2xkBHRydWXGA1cDWARib2xkBG51bGzGAEAAQQZpdGFsaWMEdHJ1ZcYCtwEAQQRib2xkBG51bGzEArgBAEESMTMyNnJwY3pucWFob3BjcnRkxgLKAQBBBml0YWxpYwRudWxsxgLLAQBBBGJvbGQEdHJ1ZRkBAMUCAgIDb3siaW1hZ2UiOiJodHRwczovL3VzZXItaW1hZ2VzLmdpdGh1YnVzZXJjb250ZW50LmNvbS81NTUzNzU3LzQ4OTc1MzA3LTYxZWZiMTAwLWYwNmQtMTFlOC05MTc3LWVlODk1ZTU5MTZlNS5wbmcifcQCCgILBzEyOTN0agrGABgAGQRib2xkBHRydWXGAA0ADgRib2xkBG51bGxEAgAHMTMwNnJ1cMQBEAIAAnVqxAESAgANaWtrY2pucmNwc2Nrd8QBHwIAAQrFBBMEFG97ImltYWdlIjoiaHR0cHM6Ly91c2VyLWltYWdlcy5naXRodWJ1c2VyY29udGVudC5jb20vNTU1Mzc1Ny80ODk3NTMwNy02MWVmYjEwMC1mMDZkLTExZTgtOTE3Ny1lZTg5NWU1OTE2ZTUucG5nIn3FAx0DBW97ImltYWdlIjoiaHR0cHM6Ly91c2VyLWltYWdlcy5naXRodWJ1c2VyY29udGVudC5jb20vNTU1Mzc1Ny80ODk3NTMwNy02MWVmYjEwMC1mMDZkLTExZTgtOTE3Ny1lZTg5NWU1OTE2ZTUucG5nIn3GAlICUwRib2xkBHRydWXGAlQCVQRib2xkBG51bGzGAnsCfAZpdGFsaWMEdHJ1ZcYBJQJ8BWNvbG9yBiIjODg4IsYBJgJ8BGJvbGQEbnVsbMQBJwJ8CjEzMTRweWNhdnXGATECfAZpdGFsaWMEbnVsbMYBMgJ8BWNvbG9yBG51bGzBATMCfAHFADEAMm97ImltYWdlIjoiaHR0cHM6Ly91c2VyLWltYWdlcy5naXRodWJ1c2VyY29udGVudC5jb20vNTU1Mzc1Ny80ODk3NTMwNy02MWVmYjEwMC1mMDZkLTExZTgtOTE3Ny1lZTg5NWU1OTE2ZTUucG5nIn3GADUANgZpdGFsaWMEdHJ1ZcEANwA4AcQAMgAzEzEzMjJybmJhb2tvcml4ZW52cArEAgUCBhcxMzIzbnVjdnhzcWx6bndsZmF2bXBjCsYDDwMQBGJvbGQEdHJ1ZR0AAMQEAwQEDTEyOTVxZnJ2bHlmYXDEAAwEBAFjxAANBAQCanbBAAwADQHEABAADQEywQARAA0ExAAVAA0DZHZmxAAYAA0BYcYCAwIEBml0YWxpYwR0cnVlwQAaAgQCxAAcAgQEMDRrdcYAIAIEBml0YWxpYwRudWxsxQQgBCFveyJpbWFnZSI6Imh0dHBzOi8vdXNlci1pbWFnZXMuZ2l0aHVidXNlcmNvbnRlbnQuY29tLzU1NTM3NTcvNDg5NzUzMDctNjFlZmIxMDAtZjA2ZC0xMWU4LTkxNzctZWU4OTVlNTkxNmU1LnBuZyJ9xQJAABZveyJpbWFnZSI6Imh0dHBzOi8vdXNlci1pbWFnZXMuZ2l0aHVidXNlcmNvbnRlbnQuY29tLzU1NTM3NTcvNDg5NzUzMDctNjFlZmIxMDAtZjA2ZC0xMWU4LTkxNzctZWU4OTVlNTkxNmU1LnBuZyJ9xAQVBBYGMTMxMWtrxAIqAisIMTMxMnFyd3TEADECKwFixAAyAisDcnhxxAA1AisBasQANgIrAXjEADcCKwZkb3ZhbwrEAgAEKwMxMzHEAEAEKwkzYXhoa3RoaHXGAnoCewRib2xkBG51bGzFAEoCe297ImltYWdlIjoiaHR0cHM6Ly91c2VyLWltYWdlcy5naXRodWJ1c2VyY29udGVudC5jb20vNTU1Mzc1Ny80ODk3NTMwNy02MWVmYjEwMC1mMDZkLTExZTgtOTE3Ny1lZTg5NWU1OTE2ZTUucG5nIn3GAEsCewRib2xkBHRydWXEAl8CYBExMzE3cGZjeWhrc3JrcGt0CsQBHwQqCzEzMTliY2Nna3AKxAKSAQKTARUxMzIwY29oYnZjcmtycGpuZ2RvYwoFBAQCAg8CKQE1AQADEAESBBsCAwsGAhIBHgJAAk8CWwJfAmQDcQJ5AaABAQIOBAILAg4CIQIoAjcCPAJEAlgCagJwAXwClwEEngEBAQI0ATcB';
+    // eslint-disable-next-line
+    const oldVal = [{"insert":"1306rup"},{"insert":"uj","attributes":{"italic":true,"color":"#888"}},{"insert":"ikkcjnrcpsckw1319bccgkp\n"},{"insert":"\n1131","attributes":{"bold":true}},{"insert":"1326rpcznqahopcrtd","attributes":{"italic":true}},{"insert":"3axhkthhu","attributes":{"bold":true}},{"insert":"28"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"9"},{"insert":"04ku","attributes":{"italic":true}},{"insert":"1323nucvxsqlznwlfavmpc\nu"},{"insert":"tc","attributes":{"italic":true}},{"insert":"je1318jwskjabdndrdlmjae\n1293tj\nj1292qrmf"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"k\nuf"},{"insert":"14hs","attributes":{"italic":true}},{"insert":"13dccxdyxg"},{"insert":"zc","attributes":{"italic":true,"color":"#888"}},{"insert":"apo"},{"insert":"tn","attributes":{"bold":true}},{"insert":"r"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"gn\n"},{"insert":"z","attributes":{"italic":true}},{"insert":"\n121"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"291311kk9zjznywohpx"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"cnbrcaq\n"},{"insert":"1","attributes":{"italic":true,"color":"#888"}},{"insert":"1310g"},{"insert":"ws","attributes":{"italic":true,"color":"#888"}},{"insert":"hxwych"},{"insert":"kq","attributes":{"italic":true}},{"insert":"sdru1320cohbvcrkrpjngdoc\njqic\n"},{"insert":"2","attributes":{"italic":true,"color":"#888"}},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"90n1297zm"},{"insert":"v1309zlgvjx","attributes":{"bold":true}},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"g","attributes":{"bold":true}},{"insert":"1314pycavu","attributes":{"italic":true,"color":"#888"}},{"insert":"pkzqcj"},{"insert":"sa","attributes":{"italic":true,"color":"#888"}},{"insert":"sjy\n"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"xr\n"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"1"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"1295qfrvlyfap201312qrwt"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"b1322rnbaokorixenvp\nrxq"},{"insert":"j","attributes":{"italic":true}},{"insert":"x","attributes":{"italic":true,"color":"#888"}},{"insert":"15mziwabzkrrmscvdovao\n0","attributes":{"italic":true}},{"insert":"hx","attributes":{"italic":true,"bold":true}},{"insert":"ojeetrjhxkr13031317pfcyhksrkpkt\nuhv1","attributes":{"italic":true}},{"insert":"32","attributes":{"italic":true,"color":"#888"}},{"insert":"4rorywthq1325iodbzizxhmlibvpyrxmq\n\nganln\nqne\n"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}},{"insert":"dvf"},{"insert":"ac","attributes":{"bold":true}},{"insert":"1302xciwa"},{"insert":"1305rl","attributes":{"bold":true}},{"insert":"08\n"},{"insert":"eyk","attributes":{"bold":true}},{"insert":"y1321apgivydqsjfsehhezukiqtt1307tvjiejlh"},{"insert":"1316zlpkmctoqomgfthbpg","attributes":{"bold":true}},{"insert":"gv"},{"insert":"lb","attributes":{"bold":true}},{"insert":"f\nhntk\njv1uu\n"},{"insert":{"image":"https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png"}}];
+    const doc = new Doc();
+    applyUpdate(doc, fromBase64(oldDoc));
+    compare(doc.getText('text').toDelta(), oldVal);
+  };
+
+  var compatibility = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    testArrayCompatibilityV1: testArrayCompatibilityV1,
+    testMapDecodingCompatibilityV1: testMapDecodingCompatibilityV1,
+    testTextDecodingCompatibilityV1: testTextDecodingCompatibilityV1
+  });
+
+  /**
+   * Client id should be changed when an instance receives updates from another client using the same client id.
+   *
+   * @param {t.TestCase} tc
+   */
+  const testClientIdDuplicateChange = tc => {
+    const doc1 = new Doc();
+    doc1.clientID = 0;
+    const doc2 = new Doc();
+    doc2.clientID = 0;
+    assert(doc2.clientID === doc1.clientID);
+    doc1.getArray('a').insert(0, [1, 2]);
+    applyUpdate(doc2, encodeStateAsUpdate(doc1));
+    assert(doc2.clientID !== doc1.clientID);
+  };
+
+  var consistency = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    testClientIdDuplicateChange: testClientIdDuplicateChange
+  });
+
   if (isBrowser) {
     createVConsole(document.body);
   }
   runTests({
-    map: map$2, array, text: text$1, xml, encoding, undoredo
+    map: map$2, array, text: text$1, xml, consistency, encoding, undoredo, compatibility
   }).then(success => {
     /* istanbul ignore next */
     if (isNode) {

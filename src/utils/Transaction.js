@@ -1,7 +1,6 @@
 
 import {
   getState,
-  createID,
   writeStructsFromTransaction,
   writeDeleteSet,
   DeleteSet,
@@ -10,13 +9,16 @@ import {
   findIndexSS,
   callEventHandlerListeners,
   Item,
-  StructStore, ID, AbstractType, AbstractStruct, YEvent, Doc // eslint-disable-line
+  generateNewClientId,
+  createID,
+  GC, StructStore, ID, AbstractType, AbstractStruct, YEvent, Doc // eslint-disable-line
 } from '../internals.js'
 
 import * as encoding from 'lib0/encoding.js'
 import * as map from 'lib0/map.js'
 import * as math from 'lib0/math.js'
 import * as set from 'lib0/set.js'
+import * as logging from 'lib0/logging.js'
 import { callAll } from 'lib0/function.js'
 
 /**
@@ -84,9 +86,9 @@ export class Transaction {
      */
     this.changedParentTypes = new Map()
     /**
-     * @type {Set<ID>}
+     * @type {Array<AbstractStruct>}
      */
-    this._mergeStructs = new Set()
+    this._mergeStructs = []
     /**
      * @type {any}
      */
@@ -154,8 +156,8 @@ const tryToMergeWithLeft = (structs, pos) => {
   if (left.deleted === right.deleted && left.constructor === right.constructor) {
     if (left.mergeWith(right)) {
       structs.splice(pos, 1)
-      if (right instanceof Item && right.parentSub !== null && right.parent._map.get(right.parentSub) === right) {
-        right.parent._map.set(right.parentSub, /** @type {Item} */ (left))
+      if (right instanceof Item && right.parentSub !== null && /** @type {AbstractType<any>} */ (right.parent)._map.get(right.parentSub) === right) {
+        /** @type {AbstractType<any>} */ (right.parent)._map.set(right.parentSub, /** @type {Item} */ (left))
       }
     }
   }
@@ -168,7 +170,7 @@ const tryToMergeWithLeft = (structs, pos) => {
  */
 const tryGcDeleteSet = (ds, store, gcFilter) => {
   for (const [client, deleteItems] of ds.clients) {
-    const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client))
+    const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client))
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di]
       const endDeleteItemClock = deleteItem.clock + deleteItem.len
@@ -197,7 +199,7 @@ const tryMergeDeleteSet = (ds, store) => {
   // try to merge deleted / gc'd items
   // merge from right to left for better efficiecy and so we don't miss any merge targets
   for (const [client, deleteItems] of ds.clients) {
-    const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client))
+    const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client))
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di]
       // start with merging the item next to the last deleted item
@@ -233,6 +235,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
     const doc = transaction.doc
     const store = doc.store
     const ds = transaction.deleteSet
+    const mergeStructs = transaction._mergeStructs
     try {
       sortAndMergeDeleteSet(ds)
       transaction.afterState = getStateVector(transaction.doc.store)
@@ -290,7 +293,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
       for (const [client, clock] of transaction.afterState) {
         const beforeClock = transaction.beforeState.get(client) || 0
         if (beforeClock !== clock) {
-          const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client))
+          const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client))
           // we iterate from right to left so we can safely remove entries
           const firstChangePos = math.max(findIndexSS(structs, beforeClock), 1)
           for (let i = structs.length - 1; i >= firstChangePos; i--) {
@@ -301,10 +304,9 @@ const cleanupTransactions = (transactionCleanups, i) => {
       // try to merge mergeStructs
       // @todo: it makes more sense to transform mergeStructs to a DS, sort it, and merge from right to left
       //        but at the moment DS does not handle duplicates
-      for (const mid of transaction._mergeStructs) {
-        const client = mid.client
-        const clock = mid.clock
-        const structs = /** @type {Array<AbstractStruct>} */ (store.clients.get(client))
+      for (let i = 0; i < mergeStructs.length; i++) {
+        const { client, clock } = mergeStructs[i].id
+        const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client))
         const replacedStructPos = findIndexSS(structs, clock)
         if (replacedStructPos + 1 < structs.length) {
           tryToMergeWithLeft(structs, replacedStructPos + 1)
@@ -312,6 +314,10 @@ const cleanupTransactions = (transactionCleanups, i) => {
         if (replacedStructPos > 0) {
           tryToMergeWithLeft(structs, replacedStructPos)
         }
+      }
+      if (!transaction.local && transaction.afterState.get(doc.clientID) !== transaction.beforeState.get(doc.clientID)) {
+        doc.clientID = generateNewClientId()
+        logging.print(logging.ORANGE, logging.BOLD, '[yjs] ', logging.UNBOLD, logging.RED, 'Changed the client-id because another client seems to be using it.')
       }
       // @todo Merge all the transactions into one and provide send the data as a single update message
       doc.emit('afterTransactionCleanup', [transaction, doc])

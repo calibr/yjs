@@ -12,14 +12,15 @@ export class AbstractStruct {
    * @param {number} length
    */
   constructor (id, length) {
-    /**
-     * The uniqe identifier of this struct.
-     * @type {ID}
-     * @readonly
-     */
     this.id = id
     this.length = length
-    this.deleted = false
+  }
+
+  /**
+   * @type {boolean}
+   */
+  get deleted () {
+    throw error.methodUnimplemented()
   }
 
   /**
@@ -44,43 +45,9 @@ export class AbstractStruct {
 
   /**
    * @param {Transaction} transaction
-   */
-  integrate (transaction) {
-    throw error.methodUnimplemented()
-  }
-}
-
-export class AbstractStructRef {
-  /**
-   * @param {ID} id
-   */
-  constructor (id) {
-    /**
-     * @type {Array<ID>}
-     */
-    this._missing = []
-    /**
-     * The uniqe identifier of this type.
-     * @type {ID}
-     */
-    this.id = id
-  }
-
-  /**
-   * @param {Transaction} transaction
-   * @return {Array<ID|null>}
-   */
-  getMissing (transaction) {
-    return this._missing
-  }
-
-  /**
-   * @param {Transaction} transaction
-   * @param {StructStore} store
    * @param {number} offset
-   * @return {AbstractStruct}
    */
-  toStruct (transaction, store, offset) {
+  integrate (transaction, offset) {
     throw error.methodUnimplemented()
   }
 }

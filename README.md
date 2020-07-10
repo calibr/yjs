@@ -41,6 +41,8 @@ height="60px" />](https://input.com/)
 [![Adam Brunnmeier](https://github.com/adabru.png?size=60)](https://github.com/adabru)
 [![Nathanael Anderson](https://github.com/NathanaelA.png?size=60)](https://github.com/NathanaelA)
 [![Gremloon](https://github.com/gremloon.png?size=60)](https://github.com/gremloon)
+[![ifiokjr](https://github.com/ifiokjr.png?size=60)](https://github.com/ifiokjr)
+[![mrfambo](https://github.com/mrfambo.png?size=60)](https://github.com/mrfambo)
 
 Sponsorship also comes with special perks! [![Become a Sponsor](https://img.shields.io/static/v1?label=Become%20a%20Sponsor&message=%E2%9D%A4&logo=GitHub&style=flat&color=d42f2d)](https://github.com/sponsors/dmonad)
 
@@ -75,8 +77,6 @@ Sponsorship also comes with special perks! [![Become a Sponsor](https://img.shie
   * [Document Updates](#Document-Updates)
   * [Relative Positions](#Relative-Positions)
   * [Y.UndoManager](#YUndoManager)
-* [Miscellaneous](#Miscellaneous)
-  * [Typescript Declarations](#Typescript-Declarations)
 * [Yjs CRDT Algorithm](#Yjs-CRDT-Algorithm)
 * [License and Author](#License-and-Author)
 
@@ -863,24 +863,6 @@ undoManager.on('stack-item-popped', event => {
   // restore the current cursor location on the stack-item
   restoreCursorLocation(event.stackItem.meta.get('cursor-location'))
 })
-```
-
-## Miscellaneous
-
-### Typescript Declarations
-
-Yjs has type descriptions. But until [this
-ticket](https://github.com/Microsoft/TypeScript/issues/7546) is fixed, this is
-how you can make use of Yjs type declarations.
-
-```json
-{
-  "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
-  },
-  "maxNodeModuleJsDepth": 5
-}
 ```
 
 ## Yjs CRDT Algorithm

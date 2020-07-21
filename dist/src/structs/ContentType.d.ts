@@ -1,8 +1,8 @@
 /**
- * @type {Array<function(decoding.Decoder):AbstractType<any>>}
+ * @type {Array<function(AbstractUpdateDecoder):AbstractType<any>>}
  * @private
  */
-export const typeRefs: Array<(arg0: decoding.Decoder) => AbstractType<any>>;
+export const typeRefs: Array<(arg0: AbstractUpdateDecoder) => AbstractType<any>>;
 export const YArrayRefID: 0;
 export const YMapRefID: 1;
 export const YTextRefID: 2;
@@ -29,7 +29,7 @@ export class ContentType {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */
@@ -62,20 +62,20 @@ export class ContentType {
      */
     gc(store: StructStore): void;
     /**
-     * @param {encoding.Encoder} encoder
+     * @param {AbstractUpdateEncoder} encoder
      * @param {number} offset
      */
-    write(encoder: encoding.Encoder, offset: number): void;
+    write(encoder: AbstractUpdateEncoder, offset: number): void;
     /**
      * @return {number}
      */
     getRef(): number;
 }
-export function readContentType(decoder: decoding.Decoder): ContentType;
-import * as decoding from "lib0/decoding";
+export function readContentType(decoder: AbstractUpdateDecoder): ContentType;
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";
 import { AbstractType } from "../types/AbstractType.js";
 import { Transaction } from "../utils/Transaction.js";
 import { Item } from "./Item.js";
 import { StructStore } from "../utils/StructStore.js";
-import * as encoding from "lib0/encoding";
+import { AbstractUpdateEncoder } from "../utils/UpdateEncoder.js";
 import { YEvent } from "../utils/YEvent.js";

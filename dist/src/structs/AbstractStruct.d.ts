@@ -19,11 +19,11 @@ export class AbstractStruct {
      */
     mergeWith(right: AbstractStruct): boolean;
     /**
-     * @param {encoding.Encoder} encoder The encoder to write data to.
+     * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
      * @param {number} offset
      * @param {number} encodingRef
      */
-    write(encoder: encoding.Encoder, offset: number, encodingRef: number): void;
+    write(encoder: AbstractUpdateEncoder, offset: number, encodingRef: number): void;
     /**
      * @param {Transaction} transaction
      * @param {number} offset
@@ -31,5 +31,5 @@ export class AbstractStruct {
     integrate(transaction: Transaction, offset: number): void;
 }
 import { ID } from "../utils/ID.js";
-import * as encoding from "lib0/encoding";
+import { AbstractUpdateEncoder } from "../utils/UpdateEncoder.js";
 import { Transaction } from "../utils/Transaction.js";

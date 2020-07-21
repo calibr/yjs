@@ -27,20 +27,20 @@ export class DeleteSet {
     clients: Map<number, Array<DeleteItem>>;
 }
 export function iterateDeletedStructs(transaction: Transaction, ds: DeleteSet, f: (arg0: GC | Item) => void): void;
-export function findIndexDS(dis: DeleteItem[], clock: number): number | null;
+export function findIndexDS(dis: Array<DeleteItem>, clock: number): number | null;
 export function isDeleted(ds: DeleteSet, id: ID): boolean;
 export function sortAndMergeDeleteSet(ds: DeleteSet): void;
-export function mergeDeleteSets(dss: DeleteSet[]): DeleteSet;
-export function addToDeleteSet(ds: DeleteSet, id: ID, length: number): void;
+export function mergeDeleteSets(dss: Array<DeleteSet>): DeleteSet;
+export function addToDeleteSet(ds: DeleteSet, client: number, clock: number, length: number): void;
 export function createDeleteSet(): DeleteSet;
 export function createDeleteSetFromStructStore(ss: StructStore): DeleteSet;
-export function writeDeleteSet(encoder: encoding.Encoder, ds: DeleteSet): void;
-export function readDeleteSet(decoder: decoding.Decoder): DeleteSet;
-export function readAndApplyDeleteSet(decoder: decoding.Decoder, transaction: Transaction, store: StructStore): void;
+export function writeDeleteSet(encoder: AbstractDSEncoder, ds: DeleteSet): void;
+export function readDeleteSet(decoder: AbstractDSDecoder): DeleteSet;
+export function readAndApplyDeleteSet(decoder: AbstractDSDecoder, transaction: Transaction, store: StructStore): void;
 import { Transaction } from "./Transaction.js";
 import { GC } from "../structs/GC.js";
 import { Item } from "../structs/Item.js";
 import { ID } from "./ID.js";
 import { StructStore } from "./StructStore.js";
-import * as encoding from "lib0/encoding";
-import * as decoding from "lib0/decoding";
+import { AbstractDSEncoder } from "./UpdateEncoder.js";
+import { AbstractDSDecoder } from "./UpdateDecoder.js";

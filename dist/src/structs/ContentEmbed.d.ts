@@ -14,7 +14,7 @@ export class ContentEmbed {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */
@@ -47,18 +47,18 @@ export class ContentEmbed {
      */
     gc(store: StructStore): void;
     /**
-     * @param {encoding.Encoder} encoder
+     * @param {AbstractUpdateEncoder} encoder
      * @param {number} offset
      */
-    write(encoder: encoding.Encoder, offset: number): void;
+    write(encoder: AbstractUpdateEncoder, offset: number): void;
     /**
      * @return {number}
      */
     getRef(): number;
 }
-export function readContentEmbed(decoder: decoding.Decoder): ContentEmbed;
+export function readContentEmbed(decoder: AbstractUpdateDecoder): ContentEmbed;
 import { Transaction } from "../utils/Transaction.js";
 import { Item } from "./Item.js";
 import { StructStore } from "../utils/StructStore.js";
-import * as encoding from "lib0/encoding";
-import * as decoding from "lib0/decoding";
+import { AbstractUpdateEncoder } from "../utils/UpdateEncoder.js";
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";

@@ -21,7 +21,7 @@ export class UndoManager extends Observable<"stack-item-added" | "stack-item-pop
      * @param {AbstractType<any>|Array<AbstractType<any>>} typeScope Accepts either a single type, or an array of types
      * @param {UndoManagerOptions} options
      */
-    constructor(typeScope: AbstractType<any> | AbstractType<any>[], { captureTimeout, deleteFilter, trackedOrigins }?: UndoManagerOptions);
+    constructor(typeScope: AbstractType<any> | Array<AbstractType<any>>, { captureTimeout, deleteFilter, trackedOrigins }?: UndoManagerOptions);
     scope: AbstractType<any>[];
     deleteFilter: (arg0: Item) => boolean;
     trackedOrigins: Set<any>;

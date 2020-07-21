@@ -1,29 +1,19 @@
-export class ItemListPosition {
+export class ItemTextListPosition {
     /**
      * @param {Item|null} left
      * @param {Item|null} right
-     */
-    constructor(left: Item | null, right: Item | null);
-    left: Item | null;
-    right: Item | null;
-}
-export class ItemTextListPosition extends ItemListPosition {
-    /**
-     * @param {Item|null} left
-     * @param {Item|null} right
+     * @param {number} index
      * @param {Map<string,any>} currentAttributes
      */
-    constructor(left: Item | null, right: Item | null, currentAttributes: Map<string, any>);
+    constructor(left: Item | null, right: Item | null, index: number, currentAttributes: Map<string, any>);
+    left: Item | null;
+    right: Item | null;
+    index: number;
     currentAttributes: Map<string, any>;
-}
-export class ItemInsertionResult extends ItemListPosition {
     /**
-     * @param {Item|null} left
-     * @param {Item|null} right
-     * @param {Map<string,any>} negatedAttributes
+     * Only call this if you know that this.right is defined
      */
-    constructor(left: Item | null, right: Item | null, negatedAttributes: Map<string, any>);
-    negatedAttributes: Map<string, any>;
+    forward(): void;
 }
 export function cleanupYTextFormatting(type: YText): number;
 /**
@@ -79,7 +69,7 @@ export class YTextEvent extends YEvent {
      *
      * @public
      */
-    get delta(): DeltaItem[];
+    public get delta(): DeltaItem[];
 }
 /**
  * Type that represents text with formatting information.
@@ -99,26 +89,13 @@ export class YText extends AbstractType<YTextEvent> {
      * Array of pending operations on this type
      * @type {Array<function():void>?}
      */
-    _pending: Array<() => void> | null;
+    _pending: (() => void)[] | null;
     /**
      * Number of characters of this text type.
      *
      * @type {number}
      */
     get length(): number;
-    /**
-     * @param {Doc} y
-     * @param {Item} item
-     */
-    _integrate(y: Doc, item: Item): void;
-    _copy(): YText;
-    /**
-     * Returns the unformatted string representation of this YText type.
-     *
-     * @return {string}
-     * @public
-     */
-    toJSON(): string;
     /**
      * Apply a {@link Delta} on this shared YText type.
      *
@@ -129,7 +106,7 @@ export class YText extends AbstractType<YTextEvent> {
      *
      * @public
      */
-    applyDelta(delta: any, { sanitize }?: {
+    public applyDelta(delta: any, { sanitize }?: {
         sanitize?: boolean;
     } | undefined): void;
     /**
@@ -142,7 +119,7 @@ export class YText extends AbstractType<YTextEvent> {
      *
      * @public
      */
-    toDelta(snapshot?: Snapshot | undefined, prevSnapshot?: Snapshot | undefined, computeYChange?: ((arg0: "removed" | "added", arg1: ID) => any) | undefined): any;
+    public toDelta(snapshot?: Snapshot | undefined, prevSnapshot?: Snapshot | undefined, computeYChange?: ((arg0: 'removed' | 'added', arg1: ID) => any) | undefined): any;
     /**
      * Insert text at a given index.
      *
@@ -153,7 +130,7 @@ export class YText extends AbstractType<YTextEvent> {
      *                                    Text.
      * @public
      */
-    insert(index: number, text: string, attributes?: Object | undefined): void;
+    public insert(index: number, text: string, attributes?: Object | undefined): void;
     /**
      * Inserts an embed at a index.
      *
@@ -164,7 +141,7 @@ export class YText extends AbstractType<YTextEvent> {
      *
      * @public
      */
-    insertEmbed(index: number, embed: Object, attributes?: Object): void;
+    public insertEmbed(index: number, embed: Object, attributes?: TextAttributes): void;
     /**
      * Deletes text starting from an index.
      *
@@ -173,7 +150,7 @@ export class YText extends AbstractType<YTextEvent> {
      *
      * @public
      */
-    delete(index: number, length: number): void;
+    public delete(index: number, length: number): void;
     /**
      * Assigns properties to a range of text.
      *
@@ -184,9 +161,9 @@ export class YText extends AbstractType<YTextEvent> {
      *
      * @public
      */
-    format(index: number, length: number, attributes: Object): void;
+    public format(index: number, length: number, attributes: TextAttributes): void;
 }
-export function readYText(decoder: decoding.Decoder): YText;
+export function readYText(decoder: AbstractUpdateDecoder): YText;
 /**
  * Attributes that can be assigned to a selection of text.
  */
@@ -203,7 +180,6 @@ import { Item } from "../structs/Item.js";
 import { YEvent } from "../utils/YEvent.js";
 import { Transaction } from "../utils/Transaction.js";
 import { AbstractType } from "./AbstractType.js";
-import { Doc } from "../utils/Doc.js";
 import { Snapshot } from "../utils/Snapshot.js";
 import { ID } from "../utils/ID.js";
-import * as decoding from "lib0/decoding";
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";

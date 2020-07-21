@@ -19,7 +19,7 @@ export class Item extends AbstractStruct {
      * @param {string | null} parentSub
      * @param {AbstractContent} content
      */
-    constructor(id: ID, left: Item | null, origin: ID | null, right: Item | null, rightOrigin: ID | null, parent: ID | AbstractType<any> | null, parentSub: string | null, content: AbstractContent);
+    constructor(id: ID, left: Item | null, origin: ID | null, right: Item | null, rightOrigin: ID | null, parent: AbstractType<any> | ID | null, parentSub: string | null, content: AbstractContent);
     /**
      * The item that was originally to the left of this item.
      * @type {ID | null}
@@ -51,7 +51,7 @@ export class Item extends AbstractStruct {
      * which to insert to. Otherwise it is `parent._map`.
      * @type {String | null}
      */
-    parentSub: String | null;
+    parentSub: string | null;
     /**
      * If this type's effect is reundone this type refers to the type that undid
      * this operation.
@@ -62,19 +62,27 @@ export class Item extends AbstractStruct {
      * @type {AbstractContent}
      */
     content: AbstractContent;
+    /**
+     * bit1: keep
+     * bit2: countable
+     * bit3: deleted
+     * bit4: mark - mark node as fast-search-marker
+     * @type {number} byte
+     */
     info: number;
+    /**
+     * This is used to mark the item as an indexed fast-search marker
+     *
+     * @type {boolean}
+     */
+    set marker(arg: boolean);
+    get marker(): boolean;
     set keep(arg: boolean);
     /**
      * If true, do not garbage collect this Item.
      */
     get keep(): boolean;
     get countable(): boolean;
-    set deleted(arg: boolean);
-    /**
-     * Whether this item was deleted or not.
-     * @type {Boolean}
-     */
-    get deleted(): boolean;
     markDeleted(): void;
     /**
      * Return the creator clientID of the missing op or define missing items and return null.
@@ -83,7 +91,7 @@ export class Item extends AbstractStruct {
      * @param {StructStore} store
      * @return {null | number}
      */
-    getMissing(transaction: Transaction, store: StructStore): number | null;
+    getMissing(transaction: Transaction, store: StructStore): null | number;
     /**
      * Returns the next non-deleted item
      */
@@ -97,13 +105,6 @@ export class Item extends AbstractStruct {
      */
     get lastId(): ID;
     /**
-     * Try to merge two items
-     *
-     * @param {Item} right
-     * @return {boolean}
-     */
-    mergeWith(right: Item): boolean;
-    /**
      * Mark this Item as deleted.
      *
      * @param {Transaction} transaction
@@ -114,23 +115,14 @@ export class Item extends AbstractStruct {
      * @param {boolean} parentGCd
      */
     gc(store: StructStore, parentGCd: boolean): void;
-    /**
-     * Transform the properties of this type to binary and write it to an
-     * BinaryEncoder.
-     *
-     * This is called when this Item is sent to a remote peer.
-     *
-     * @param {encoding.Encoder} encoder The encoder to write data to.
-     * @param {number} offset
-     */
-    write(encoder: encoding.Encoder, offset: number): void;
 }
+export function readItemContent(decoder: AbstractUpdateDecoder, info: number): AbstractContent;
 /**
  * A lookup map for reading Item content.
  *
- * @type {Array<function(decoding.Decoder):AbstractContent>}
+ * @type {Array<function(AbstractUpdateDecoder):AbstractContent>}
  */
-export const contentRefs: Array<(arg0: decoding.Decoder) => AbstractContent>;
+export const contentRefs: Array<(arg0: AbstractUpdateDecoder) => AbstractContent>;
 /**
  * Do not implement this class!
  */
@@ -142,7 +134,7 @@ export class AbstractContent {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * Should return false if this Item is some kind of meta information
      * (e.g. format information).
@@ -181,21 +173,19 @@ export class AbstractContent {
      */
     gc(store: StructStore): void;
     /**
-     * @param {encoding.Encoder} encoder
+     * @param {AbstractUpdateEncoder} encoder
      * @param {number} offset
      */
-    write(encoder: encoding.Encoder, offset: number): void;
+    write(encoder: AbstractUpdateEncoder, offset: number): void;
     /**
      * @return {number}
      */
     getRef(): number;
 }
-export function readItem(decoder: decoding.Decoder, id: ID, info: number, doc: Doc): Item;
 import { StructStore } from "../utils/StructStore.js";
 import { ID } from "../utils/ID.js";
 import { Transaction } from "../utils/Transaction.js";
 import { AbstractStruct } from "./AbstractStruct.js";
 import { AbstractType } from "../types/AbstractType.js";
-import * as encoding from "lib0/encoding";
-import * as decoding from "lib0/decoding";
-import { Doc } from "../utils/Doc.js";
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";
+import { AbstractUpdateEncoder } from "../utils/UpdateEncoder.js";

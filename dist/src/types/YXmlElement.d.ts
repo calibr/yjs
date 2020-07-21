@@ -13,19 +13,13 @@ export class YXmlElement extends YXmlFragment {
      */
     _prelimAttrs: Map<string, any> | null;
     /**
-     * Creates an Item with the same effect as this Item (without position effect)
-     *
-     * @return {YXmlElement}
-     */
-    _copy(): YXmlElement;
-    /**
      * Removes an attribute from this YXmlElement.
      *
      * @param {String} attributeName The attribute name that is to be removed.
      *
      * @public
      */
-    removeAttribute(attributeName: string): void;
+    public removeAttribute(attributeName: string): void;
     /**
      * Sets or updates an attribute.
      *
@@ -34,7 +28,7 @@ export class YXmlElement extends YXmlFragment {
      *
      * @public
      */
-    setAttribute(attributeName: string, attributeValue: string): void;
+    public setAttribute(attributeName: string, attributeValue: string): void;
     /**
      * Returns an attribute value that belongs to the attribute name.
      *
@@ -44,7 +38,7 @@ export class YXmlElement extends YXmlFragment {
      *
      * @public
      */
-    getAttribute(attributeName: string): string;
+    public getAttribute(attributeName: string): string;
     /**
      * Returns all attribute name/value pairs in a JSON Object.
      *
@@ -53,11 +47,11 @@ export class YXmlElement extends YXmlFragment {
      *
      * @public
      */
-    getAttributes(snapshot?: Snapshot | undefined): {
+    public getAttributes(snapshot?: Snapshot | undefined): {
         [x: string]: any;
     };
 }
-export function readYXmlElement(decoder: decoding.Decoder): YXmlElement;
+export function readYXmlElement(decoder: AbstractUpdateDecoder): YXmlElement;
 import { YXmlFragment } from "./YXmlFragment.js";
 import { Snapshot } from "../utils/Snapshot.js";
-import * as decoding from "lib0/decoding";
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";

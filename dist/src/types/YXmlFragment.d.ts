@@ -26,7 +26,7 @@
  * @public
  * @implements {Iterable<YXmlElement|YXmlText|YXmlElement|YXmlHook>}
  */
-export class YXmlTreeWalker {
+export class YXmlTreeWalker implements Iterable<YXmlElement | YXmlText | YXmlHook> {
     /**
      * @param {YXmlFragment | YXmlElement} root
      * @param {function(AbstractType<any>):boolean} [f]
@@ -39,7 +39,7 @@ export class YXmlTreeWalker {
      */
     _currentNode: Item;
     _firstCall: boolean;
-    "__@iterator"(): YXmlTreeWalker;
+    [Symbol.iterator](): YXmlTreeWalker;
     /**
      * Get the next node.
      *
@@ -47,7 +47,7 @@ export class YXmlTreeWalker {
      *
      * @public
      */
-    next(): IteratorResult<YXmlElement | YXmlText | YXmlHook, any>;
+    public next(): IteratorResult<YXmlElement | YXmlText | YXmlHook>;
 }
 /**
  * Represents a list of {@link YXmlElement}.and {@link YXmlText} types.
@@ -63,18 +63,6 @@ export class YXmlFragment extends AbstractType<YXmlEvent> {
      * @type {Array<any>|null}
      */
     _prelimContent: Array<any> | null;
-    /**
-     * Integrate this type into the Yjs instance.
-     *
-     * * Save this struct in the os
-     * * This type is sent to other client
-     * * Observer functions are fired
-     *
-     * @param {Doc} y The Yjs instance
-     * @param {Item} item
-     */
-    _integrate(y: Doc, item: Item): void;
-    _copy(): YXmlFragment;
     get length(): number;
     /**
      * Create a subtree of childNodes.
@@ -93,7 +81,7 @@ export class YXmlFragment extends AbstractType<YXmlEvent> {
      *
      * @public
      */
-    createTreeWalker(filter: (arg0: AbstractType<any>) => boolean): YXmlTreeWalker;
+    public createTreeWalker(filter: (arg0: AbstractType<any>) => boolean): YXmlTreeWalker;
     /**
      * Returns the first YXmlElement that matches the query.
      * Similar to DOM's {@link querySelector}.
@@ -109,7 +97,7 @@ export class YXmlFragment extends AbstractType<YXmlEvent> {
      *
      * @public
      */
-    querySelector(query: string): YXmlElement | YXmlText | YXmlHook | null;
+    public querySelector(query: CSS_Selector): YXmlElement | YXmlText | YXmlHook | null;
     /**
      * Returns all YXmlElements that match the query.
      * Similar to Dom's {@link querySelectorAll}.
@@ -121,11 +109,7 @@ export class YXmlFragment extends AbstractType<YXmlEvent> {
      *
      * @public
      */
-    querySelectorAll(query: string): (YXmlElement | YXmlText | YXmlHook | null)[];
-    /**
-     * @return {string}
-     */
-    toJSON(): string;
+    public querySelectorAll(query: CSS_Selector): Array<YXmlElement | YXmlText | YXmlHook | null>;
     /**
      * Creates a Dom Element that mirrors this YXmlElement.
      *
@@ -141,7 +125,7 @@ export class YXmlFragment extends AbstractType<YXmlEvent> {
      *
      * @public
      */
-    toDOM(_document?: Document | undefined, hooks?: {
+    public toDOM(_document?: Document | undefined, hooks?: {
         [x: string]: any;
     } | undefined, binding?: any): Node;
     /**
@@ -154,7 +138,7 @@ export class YXmlFragment extends AbstractType<YXmlEvent> {
      * @param {number} index The index to insert content at
      * @param {Array<YXmlElement|YXmlText>} content The array of content
      */
-    insert(index: number, content: (YXmlElement | YXmlText)[]): void;
+    insert(index: number, content: Array<YXmlElement | YXmlText>): void;
     /**
      * Deletes elements starting from an index.
      *
@@ -167,9 +151,9 @@ export class YXmlFragment extends AbstractType<YXmlEvent> {
      *
      * @return {Array<YXmlElement|YXmlText|YXmlHook>}
      */
-    toArray(): (YXmlElement | YXmlText | YXmlHook)[];
+    toArray(): Array<YXmlElement | YXmlText | YXmlHook>;
 }
-export function readYXmlFragment(decoder: decoding.Decoder): YXmlFragment;
+export function readYXmlFragment(decoder: AbstractUpdateDecoder): YXmlFragment;
 /**
  * Define the elements to which a set of CSS queries apply.
  * {@link https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Selectors|CSS_Selectors}
@@ -179,11 +163,10 @@ export type CSS_Selector = string;
  * Dom filter function.
  */
 export type domFilter = (nodeName: string, attributes: Map<any, any>) => boolean;
-import { AbstractType } from "./AbstractType.js";
 import { YXmlElement } from "./YXmlElement.js";
-import { Item } from "../structs/Item.js";
 import { YXmlText } from "./YXmlText.js";
 import { YXmlHook } from "./YXmlHook.js";
+import { AbstractType } from "./AbstractType.js";
+import { Item } from "../structs/Item.js";
 import { YXmlEvent } from "./YXmlEvent.js";
-import { Doc } from "../utils/Doc.js";
-import * as decoding from "lib0/decoding";
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";

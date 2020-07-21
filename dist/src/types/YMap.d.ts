@@ -18,7 +18,7 @@ export class YMapEvent<T> extends YEvent {
  * @extends AbstractType<YMapEvent<T>>
  * @implements {Iterable<T>}
  */
-export class YMap<T> extends AbstractType<YMapEvent<T>> {
+export class YMap<T> extends AbstractType<YMapEvent<T>> implements Iterable<T> {
     /**
      *
      * @param {Iterable<readonly [string, any]>=} entries - an optional iterable to initialize the YMap
@@ -28,27 +28,7 @@ export class YMap<T> extends AbstractType<YMapEvent<T>> {
      * @type {Map<string,any>?}
      * @private
      */
-    _prelimContent: Map<string, any> | null;
-    /**
-     * Integrate this type into the Yjs instance.
-     *
-     * * Save this struct in the os
-     * * This type is sent to other client
-     * * Observer functions are fired
-     *
-     * @param {Doc} y The Yjs instance
-     * @param {Item} item
-     */
-    _integrate(y: Doc, item: Item): void;
-    _copy(): YMap<any>;
-    /**
-     * Transforms this Shared Type to a JSON object.
-     *
-     * @return {Object<string,T>}
-     */
-    toJSON(): {
-        [x: string]: T;
-    };
+    private _prelimContent;
     /**
      * Returns the size of the YMap (count of key/value pairs)
      *
@@ -84,7 +64,7 @@ export class YMap<T> extends AbstractType<YMapEvent<T>> {
     /**
      * @return {IterableIterator<T>}
      */
-    "__@iterator"(): IterableIterator<T>;
+    [Symbol.iterator](): IterableIterator<T>;
     /**
      * Remove a specified element from this YMap.
      *
@@ -113,10 +93,8 @@ export class YMap<T> extends AbstractType<YMapEvent<T>> {
      */
     has(key: string): boolean;
 }
-export function readYMap(decoder: decoding.Decoder): YMap<any>;
+export function readYMap(decoder: AbstractUpdateDecoder): YMap<any>;
 import { YEvent } from "../utils/YEvent.js";
 import { Transaction } from "../utils/Transaction.js";
 import { AbstractType } from "./AbstractType.js";
-import { Doc } from "../utils/Doc.js";
-import { Item } from "../structs/Item.js";
-import * as decoding from "lib0/decoding";
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";

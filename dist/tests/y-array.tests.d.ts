@@ -1,3 +1,4 @@
+export function testBasicUpdate(tc: t.TestCase): void;
 export function testDeleteInsert(tc: t.TestCase): void;
 export function testInsertThreeElementsTryRegetProperty(tc: t.TestCase): void;
 export function testConcurrentInsertWithThreeConflicts(tc: t.TestCase): void;
@@ -16,7 +17,7 @@ export function testGarbageCollector(tc: t.TestCase): void;
 export function testEventTargetIsSetCorrectlyOnLocal(tc: t.TestCase): void;
 export function testEventTargetIsSetCorrectlyOnRemote(tc: t.TestCase): void;
 export function testIteratingArrayContainingTypes(tc: t.TestCase): void;
-export function testRepeatGeneratingYarrayTests4(tc: t.TestCase): void;
+export function testRepeatGeneratingYarrayTests6(tc: t.TestCase): void;
 export function testRepeatGeneratingYarrayTests40(tc: t.TestCase): void;
 export function testRepeatGeneratingYarrayTests42(tc: t.TestCase): void;
 export function testRepeatGeneratingYarrayTests43(tc: t.TestCase): void;

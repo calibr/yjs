@@ -5,7 +5,7 @@ export class ContentJSON {
     /**
      * @param {Array<any>} arr
      */
-    constructor(arr: any[]);
+    constructor(arr: Array<any>);
     /**
      * @type {Array<any>}
      */
@@ -17,7 +17,7 @@ export class ContentJSON {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */
@@ -50,18 +50,18 @@ export class ContentJSON {
      */
     gc(store: StructStore): void;
     /**
-     * @param {encoding.Encoder} encoder
+     * @param {AbstractUpdateEncoder} encoder
      * @param {number} offset
      */
-    write(encoder: encoding.Encoder, offset: number): void;
+    write(encoder: AbstractUpdateEncoder, offset: number): void;
     /**
      * @return {number}
      */
     getRef(): number;
 }
-export function readContentJSON(decoder: decoding.Decoder): ContentJSON;
+export function readContentJSON(decoder: AbstractUpdateDecoder): ContentJSON;
 import { Transaction } from "../utils/Transaction.js";
 import { Item } from "./Item.js";
 import { StructStore } from "../utils/StructStore.js";
-import * as encoding from "lib0/encoding";
-import * as decoding from "lib0/decoding";
+import { AbstractUpdateEncoder } from "../utils/UpdateEncoder.js";
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";

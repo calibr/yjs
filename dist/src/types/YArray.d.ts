@@ -16,24 +16,12 @@ export class YArrayEvent<T> extends YEvent {
  * @extends AbstractType<YArrayEvent<T>>
  * @implements {Iterable<T>}
  */
-export class YArray<T> extends AbstractType<YArrayEvent<T>> {
+export class YArray<T> extends AbstractType<YArrayEvent<T>> implements Iterable<T> {
     /**
      * @type {Array<any>?}
      * @private
      */
-    _prelimContent: Array<any> | null;
-    /**
-     * Integrate this type into the Yjs instance.
-     *
-     * * Save this struct in the os
-     * * This type is sent to other client
-     * * Observer functions are fired
-     *
-     * @param {Doc} y The Yjs instance
-     * @param {Item} item
-     */
-    _integrate(y: Doc, item: Item): void;
-    _copy(): YArray<any>;
+    private _prelimContent;
     get length(): number;
     /**
      * Inserts new content at an index.
@@ -85,12 +73,6 @@ export class YArray<T> extends AbstractType<YArrayEvent<T>> {
      */
     toArray(): T[];
     /**
-     * Transforms this Shared Type to a JSON object.
-     *
-     * @return {Array<any>}
-     */
-    toJSON(): any[];
-    /**
      * Returns an Array with the result of calling a provided function on every
      * element of this YArray.
      *
@@ -109,12 +91,10 @@ export class YArray<T> extends AbstractType<YArrayEvent<T>> {
     /**
      * @return {IterableIterator<T>}
      */
-    "__@iterator"(): IterableIterator<T>;
+    [Symbol.iterator](): IterableIterator<T>;
 }
-export function readYArray(decoder: decoding.Decoder): YArray<any>;
+export function readYArray(decoder: AbstractUpdateDecoder): YArray<any>;
 import { YEvent } from "../utils/YEvent.js";
 import { Transaction } from "../utils/Transaction.js";
 import { AbstractType } from "./AbstractType.js";
-import { Doc } from "../utils/Doc.js";
-import { Item } from "../structs/Item.js";
-import * as decoding from "lib0/decoding";
+import { AbstractUpdateDecoder } from "../utils/UpdateDecoder.js";

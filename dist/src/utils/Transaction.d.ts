@@ -43,19 +43,19 @@ export class Transaction {
      * Holds the state before the transaction started.
      * @type {Map<Number,Number>}
      */
-    beforeState: Map<Number, Number>;
+    beforeState: Map<number, number>;
     /**
      * Holds the state after the transaction.
      * @type {Map<Number,Number>}
      */
-    afterState: Map<Number, Number>;
+    afterState: Map<number, number>;
     /**
      * All types that were directly modified (property added or child
      * inserted/deleted). New types are not included in this Set.
      * Maps from type to parentSubs (`item.parentSub = null` for YArray)
      * @type {Map<AbstractType<YEvent>,Set<String|null>>}
      */
-    changed: Map<AbstractType<YEvent>, Set<String | null>>;
+    changed: Map<AbstractType<YEvent>, Set<string | null>>;
     /**
      * Stores the events for the types that observe also child elements.
      * It is mainly used by `observeDeep`.
@@ -81,8 +81,8 @@ export class Transaction {
      */
     local: boolean;
 }
-export function computeUpdateMessageFromTransaction(transaction: Transaction): encoding.Encoder | null;
-export function nextID(transaction: Transaction): ID;
+export function writeUpdateMessageFromTransaction(encoder: AbstractUpdateEncoder, transaction: Transaction): boolean;
+export function nextID(transaction: Transaction): import("./ID.js").ID;
 export function addChangedTypeToTransaction(transaction: Transaction, type: AbstractType<YEvent>, parentSub: string | null): void;
 export function tryGc(ds: DeleteSet, store: StructStore, gcFilter: (arg0: Item) => boolean): void;
 export function transact(doc: Doc, f: (arg0: Transaction) => void, origin?: any, local?: boolean): void;
@@ -91,7 +91,6 @@ import { DeleteSet } from "./DeleteSet.js";
 import { AbstractType } from "../types/AbstractType.js";
 import { YEvent } from "./YEvent.js";
 import { AbstractStruct } from "../structs/AbstractStruct.js";
-import * as encoding from "lib0/encoding";
-import { ID } from "./ID.js";
+import { AbstractUpdateEncoder } from "./UpdateEncoder.js";
 import { StructStore } from "./StructStore.js";
 import { Item } from "../structs/Item.js";

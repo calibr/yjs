@@ -2,22 +2,42 @@
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
+var observable_js = require('lib0/dist/observable.cjs');
 var array = require('lib0/dist/array.cjs');
 var math = require('lib0/dist/math.cjs');
 var map = require('lib0/dist/map.cjs');
 var encoding = require('lib0/dist/encoding.cjs');
 var decoding = require('lib0/dist/decoding.cjs');
-var observable_js = require('lib0/dist/observable.cjs');
 var random = require('lib0/dist/random.cjs');
+var buffer = require('lib0/dist/buffer.cjs');
+var error = require('lib0/dist/error.cjs');
 var binary = require('lib0/dist/binary.cjs');
 var f = require('lib0/dist/function.cjs');
-var error = require('lib0/dist/error.cjs');
 var set = require('lib0/dist/set.cjs');
 var logging = require('lib0/dist/logging.cjs');
 var time = require('lib0/dist/time.cjs');
 var iterator = require('lib0/dist/iterator.cjs');
 var object = require('lib0/dist/object.cjs');
-var buffer = require('lib0/dist/buffer.cjs');
+
+/**
+ * This is an abstract interface that all Connectors should implement to keep them interchangeable.
+ *
+ * @note This interface is experimental and it is not advised to actually inherit this class.
+ *       It just serves as typing information.
+ *
+ * @extends {Observable<any>}
+ */
+class AbstractConnector extends observable_js.Observable {
+  /**
+   * @param {Doc} ydoc
+   * @param {any} awareness
+   */
+  constructor (ydoc, awareness) {
+    super();
+    this.doc = ydoc;
+    this.awareness = awareness;
+  }
+}
 
 class DeleteItem {
   /**
@@ -168,14 +188,15 @@ const mergeDeleteSets = dss => {
 
 /**
  * @param {DeleteSet} ds
- * @param {ID} id
+ * @param {number} client
+ * @param {number} clock
  * @param {number} length
  *
  * @private
  * @function
  */
-const addToDeleteSet = (ds, id, length) => {
-  map.setIfUndefined(ds.clients, id.client, () => []).push(new DeleteItem(id.clock, length));
+const addToDeleteSet = (ds, client, clock, length) => {
+  map.setIfUndefined(ds.clients, client, () => []).push(new DeleteItem(clock, length));
 };
 
 const createDeleteSet = () => new DeleteSet();
@@ -215,28 +236,29 @@ const createDeleteSetFromStructStore = ss => {
 };
 
 /**
- * @param {encoding.Encoder} encoder
+ * @param {AbstractDSEncoder} encoder
  * @param {DeleteSet} ds
  *
  * @private
  * @function
  */
 const writeDeleteSet = (encoder, ds) => {
-  encoding.writeVarUint(encoder, ds.clients.size);
+  encoding.writeVarUint(encoder.restEncoder, ds.clients.size);
   ds.clients.forEach((dsitems, client) => {
-    encoding.writeVarUint(encoder, client);
+    encoder.resetDsCurVal();
+    encoding.writeVarUint(encoder.restEncoder, client);
     const len = dsitems.length;
-    encoding.writeVarUint(encoder, len);
+    encoding.writeVarUint(encoder.restEncoder, len);
     for (let i = 0; i < len; i++) {
       const item = dsitems[i];
-      encoding.writeVarUint(encoder, item.clock);
-      encoding.writeVarUint(encoder, item.len);
+      encoder.writeDsClock(item.clock);
+      encoder.writeDsLen(item.len);
     }
   });
 };
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractDSDecoder} decoder
  * @return {DeleteSet}
  *
  * @private
@@ -244,19 +266,27 @@ const writeDeleteSet = (encoder, ds) => {
  */
 const readDeleteSet = decoder => {
   const ds = new DeleteSet();
-  const numClients = decoding.readVarUint(decoder);
+  const numClients = decoding.readVarUint(decoder.restDecoder);
   for (let i = 0; i < numClients; i++) {
-    const client = decoding.readVarUint(decoder);
-    const numberOfDeletes = decoding.readVarUint(decoder);
-    for (let i = 0; i < numberOfDeletes; i++) {
-      addToDeleteSet(ds, createID(client, decoding.readVarUint(decoder)), decoding.readVarUint(decoder));
+    decoder.resetDsCurVal();
+    const client = decoding.readVarUint(decoder.restDecoder);
+    const numberOfDeletes = decoding.readVarUint(decoder.restDecoder);
+    if (numberOfDeletes > 0) {
+      const dsField = map.setIfUndefined(ds.clients, client, () => []);
+      for (let i = 0; i < numberOfDeletes; i++) {
+        dsField.push(new DeleteItem(decoder.readDsClock(), decoder.readDsLen()));
+      }
     }
   }
   return ds
 };
 
 /**
- * @param {decoding.Decoder} decoder
+ * @todo YDecoder also contains references to String and other Decoders. Would make sense to exchange YDecoder.toUint8Array for YDecoder.DsToUint8Array()..
+ */
+
+/**
+ * @param {AbstractDSDecoder} decoder
  * @param {Transaction} transaction
  * @param {StructStore} store
  *
@@ -265,18 +295,19 @@ const readDeleteSet = decoder => {
  */
 const readAndApplyDeleteSet = (decoder, transaction, store) => {
   const unappliedDS = new DeleteSet();
-  const numClients = decoding.readVarUint(decoder);
+  const numClients = decoding.readVarUint(decoder.restDecoder);
   for (let i = 0; i < numClients; i++) {
-    const client = decoding.readVarUint(decoder);
-    const numberOfDeletes = decoding.readVarUint(decoder);
+    decoder.resetDsCurVal();
+    const client = decoding.readVarUint(decoder.restDecoder);
+    const numberOfDeletes = decoding.readVarUint(decoder.restDecoder);
     const structs = store.clients.get(client) || [];
     const state = getState(store, client);
     for (let i = 0; i < numberOfDeletes; i++) {
-      const clock = decoding.readVarUint(decoder);
-      const len = decoding.readVarUint(decoder);
+      const clock = decoder.readDsClock();
+      const clockEnd = clock + decoder.readDsLen();
       if (clock < state) {
-        if (state < clock + len) {
-          addToDeleteSet(unappliedDS, createID(client, state), clock + len - state);
+        if (state < clockEnd) {
+          addToDeleteSet(unappliedDS, client, state, clockEnd - state);
         }
         let index = findIndexSS(structs, clock);
         /**
@@ -293,10 +324,10 @@ const readAndApplyDeleteSet = (decoder, transaction, store) => {
         while (index < structs.length) {
           // @ts-ignore
           struct = structs[index++];
-          if (struct.id.clock < clock + len) {
+          if (struct.id.clock < clockEnd) {
             if (!struct.deleted) {
-              if (clock + len < struct.id.clock + struct.length) {
-                structs.splice(index, 0, splitItem(transaction, struct, clock + len - struct.id.clock));
+              if (clockEnd < struct.id.clock + struct.length) {
+                structs.splice(index, 0, splitItem(transaction, struct, clockEnd - struct.id.clock));
               }
               struct.delete(transaction);
             }
@@ -305,15 +336,15 @@ const readAndApplyDeleteSet = (decoder, transaction, store) => {
           }
         }
       } else {
-        addToDeleteSet(unappliedDS, createID(client, clock), len);
+        addToDeleteSet(unappliedDS, client, clock, clockEnd - clock);
       }
     }
   }
   if (unappliedDS.clients.size > 0) {
     // TODO: no need for encoding+decoding ds anymore
-    const unappliedDSEncoder = encoding.createEncoder();
+    const unappliedDSEncoder = new DSEncoderV2();
     writeDeleteSet(unappliedDSEncoder, unappliedDS);
-    store.pendingDeleteReaders.push(decoding.createDecoder(encoding.toUint8Array(unappliedDSEncoder)));
+    store.pendingDeleteReaders.push(new DSDecoderV2(decoding.createDecoder((unappliedDSEncoder.toUint8Array()))));
   }
 };
 
@@ -430,47 +461,65 @@ class Doc extends observable_js.Observable {
 
   /**
    * @template T
-   * @param {string} name
+   * @param {string} [name]
    * @return {YArray<T>}
    *
    * @public
    */
-  getArray (name) {
+  getArray (name = '') {
     // @ts-ignore
     return this.get(name, YArray)
   }
 
   /**
-   * @param {string} name
+   * @param {string} [name]
    * @return {YText}
    *
    * @public
    */
-  getText (name) {
+  getText (name = '') {
     // @ts-ignore
     return this.get(name, YText)
   }
 
   /**
-   * @param {string} name
+   * @param {string} [name]
    * @return {YMap<any>}
    *
    * @public
    */
-  getMap (name) {
+  getMap (name = '') {
     // @ts-ignore
     return this.get(name, YMap)
   }
 
   /**
-   * @param {string} name
+   * @param {string} [name]
    * @return {YXmlFragment}
    *
    * @public
    */
-  getXmlFragment (name) {
+  getXmlFragment (name = '') {
     // @ts-ignore
     return this.get(name, YXmlFragment)
+  }
+
+  /**
+   * Converts the entire document into a js object, recursively traversing each yjs type
+   *
+   * @return {Object<string, any>}
+   */
+  toJSON () {
+    /**
+     * @type {Object<string, any>}
+     */
+    const doc = {};
+
+    this.share.forEach((value, key) => {
+      doc[key] = value.toJSON();
+    });
+
+    return doc
   }
 
   /**
@@ -498,8 +547,580 @@ class Doc extends observable_js.Observable {
   }
 }
 
+class DSDecoderV1 {
+  /**
+   * @param {decoding.Decoder} decoder
+   */
+  constructor (decoder) {
+    this.restDecoder = decoder;
+  }
+
+  resetDsCurVal () {
+    // nop
+  }
+
+  /**
+   * @return {number}
+   */
+  readDsClock () {
+    return decoding.readVarUint(this.restDecoder)
+  }
+
+  /**
+   * @return {number}
+   */
+  readDsLen () {
+    return decoding.readVarUint(this.restDecoder)
+  }
+}
+
+class UpdateDecoderV1 extends DSDecoderV1 {
+  /**
+   * @return {ID}
+   */
+  readLeftID () {
+    return createID(decoding.readVarUint(this.restDecoder), decoding.readVarUint(this.restDecoder))
+  }
+
+  /**
+   * @return {ID}
+   */
+  readRightID () {
+    return createID(decoding.readVarUint(this.restDecoder), decoding.readVarUint(this.restDecoder))
+  }
+
+  /**
+   * Read the next client id.
+   * Use this in favor of readID whenever possible to reduce the number of objects created.
+   */
+  readClient () {
+    return decoding.readVarUint(this.restDecoder)
+  }
+
+  /**
+   * @return {number} info An unsigned 8-bit integer
+   */
+  readInfo () {
+    return decoding.readUint8(this.restDecoder)
+  }
+
+  /**
+   * @return {string}
+   */
+  readString () {
+    return decoding.readVarString(this.restDecoder)
+  }
+
+  /**
+   * @return {boolean} isKey
+   */
+  readParentInfo () {
+    return decoding.readVarUint(this.restDecoder) === 1
+  }
+
+  /**
+   * @return {number} info An unsigned 8-bit integer
+   */
+  readTypeRef () {
+    return decoding.readVarUint(this.restDecoder)
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @return {number} len
+   */
+  readLen () {
+    return decoding.readVarUint(this.restDecoder)
+  }
+
+  /**
+   * @return {any}
+   */
+  readAny () {
+    return decoding.readAny(this.restDecoder)
+  }
+
+  /**
+   * @return {Uint8Array}
+   */
+  readBuf () {
+    return buffer.copyUint8Array(decoding.readVarUint8Array(this.restDecoder))
+  }
+
+  /**
+   * Legacy implementation uses JSON parse. We use any-decoding in v2.
+   *
+   * @return {any}
+   */
+  readJSON () {
+    return JSON.parse(decoding.readVarString(this.restDecoder))
+  }
+
+  /**
+   * @return {string}
+   */
+  readKey () {
+    return decoding.readVarString(this.restDecoder)
+  }
+}
+
+class DSDecoderV2 {
+  /**
+   * @param {decoding.Decoder} decoder
+   */
+  constructor (decoder) {
+    this.dsCurrVal = 0;
+    this.restDecoder = decoder;
+  }
+
+  resetDsCurVal () {
+    this.dsCurrVal = 0;
+  }
+
+  readDsClock () {
+    this.dsCurrVal += decoding.readVarUint(this.restDecoder);
+    return this.dsCurrVal
+  }
+
+  readDsLen () {
+    const diff = decoding.readVarUint(this.restDecoder) + 1;
+    this.dsCurrVal += diff;
+    return diff
+  }
+}
+
+class UpdateDecoderV2 extends DSDecoderV2 {
+  /**
+   * @param {decoding.Decoder} decoder
+   */
+  constructor (decoder) {
+    super(decoder);
+    /**
+     * List of cached keys. If the keys[id] does not exist, we read a new key
+     * from stringEncoder and push it to keys.
+     *
+     * @type {Array<string>}
+     */
+    this.keys = [];
+    decoding.readUint8(decoder); // read feature flag - currently unused
+    this.keyClockDecoder = new decoding.IntDiffOptRleDecoder(decoding.readVarUint8Array(decoder));
+    this.clientDecoder = new decoding.UintOptRleDecoder(decoding.readVarUint8Array(decoder));
+    this.leftClockDecoder = new decoding.IntDiffOptRleDecoder(decoding.readVarUint8Array(decoder));
+    this.rightClockDecoder = new decoding.IntDiffOptRleDecoder(decoding.readVarUint8Array(decoder));
+    this.infoDecoder = new decoding.RleDecoder(decoding.readVarUint8Array(decoder), decoding.readUint8);
+    this.stringDecoder = new decoding.StringDecoder(decoding.readVarUint8Array(decoder));
+    this.parentInfoDecoder = new decoding.RleDecoder(decoding.readVarUint8Array(decoder), decoding.readUint8);
+    this.typeRefDecoder = new decoding.UintOptRleDecoder(decoding.readVarUint8Array(decoder));
+    this.lenDecoder = new decoding.UintOptRleDecoder(decoding.readVarUint8Array(decoder));
+  }
+
+  /**
+   * @return {ID}
+   */
+  readLeftID () {
+    return new ID(this.clientDecoder.read(), this.leftClockDecoder.read())
+  }
+
+  /**
+   * @return {ID}
+   */
+  readRightID () {
+    return new ID(this.clientDecoder.read(), this.rightClockDecoder.read())
+  }
+
+  /**
+   * Read the next client id.
+   * Use this in favor of readID whenever possible to reduce the number of objects created.
+   */
+  readClient () {
+    return this.clientDecoder.read()
+  }
+
+  /**
+   * @return {number} info An unsigned 8-bit integer
+   */
+  readInfo () {
+    return /** @type {number} */ (this.infoDecoder.read())
+  }
+
+  /**
+   * @return {string}
+   */
+  readString () {
+    return this.stringDecoder.read()
+  }
+
+  /**
+   * @return {boolean}
+   */
+  readParentInfo () {
+    return this.parentInfoDecoder.read() === 1
+  }
+
+  /**
+   * @return {number} An unsigned 8-bit integer
+   */
+  readTypeRef () {
+    return this.typeRefDecoder.read()
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @return {number}
+   */
+  readLen () {
+    return this.lenDecoder.read()
+  }
+
+  /**
+   * @return {any}
+   */
+  readAny () {
+    return decoding.readAny(this.restDecoder)
+  }
+
+  /**
+   * @return {Uint8Array}
+   */
+  readBuf () {
+    return decoding.readVarUint8Array(this.restDecoder)
+  }
+
+  /**
+   * This is mainly here for legacy purposes.
+   *
+   * Initial we incoded objects using JSON. Now we use the much faster lib0/any-encoder. This method mainly exists for legacy purposes for the v1 encoder.
+   *
+   * @return {any}
+   */
+  readJSON () {
+    return decoding.readAny(this.restDecoder)
+  }
+
+  /**
+   * @return {string}
+   */
+  readKey () {
+    const keyClock = this.keyClockDecoder.read();
+    if (keyClock < this.keys.length) {
+      return this.keys[keyClock]
+    } else {
+      const key = this.stringDecoder.read();
+      this.keys.push(key);
+      return key
+    }
+  }
+}
+
+class DSEncoderV1 {
+  constructor () {
+    this.restEncoder = new encoding.Encoder();
+  }
+
+  toUint8Array () {
+    return encoding.toUint8Array(this.restEncoder)
+  }
+
+  resetDsCurVal () {
+    // nop
+  }
+
+  /**
+   * @param {number} clock
+   */
+  writeDsClock (clock) {
+    encoding.writeVarUint(this.restEncoder, clock);
+  }
+
+  /**
+   * @param {number} len
+   */
+  writeDsLen (len) {
+    encoding.writeVarUint(this.restEncoder, len);
+  }
+}
+
+class UpdateEncoderV1 extends DSEncoderV1 {
+  /**
+   * @param {ID} id
+   */
+  writeLeftID (id) {
+    encoding.writeVarUint(this.restEncoder, id.client);
+    encoding.writeVarUint(this.restEncoder, id.clock);
+  }
+
+  /**
+   * @param {ID} id
+   */
+  writeRightID (id) {
+    encoding.writeVarUint(this.restEncoder, id.client);
+    encoding.writeVarUint(this.restEncoder, id.clock);
+  }
+
+  /**
+   * Use writeClient and writeClock instead of writeID if possible.
+   * @param {number} client
+   */
+  writeClient (client) {
+    encoding.writeVarUint(this.restEncoder, client);
+  }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeInfo (info) {
+    encoding.writeUint8(this.restEncoder, info);
+  }
+
+  /**
+   * @param {string} s
+   */
+  writeString (s) {
+    encoding.writeVarString(this.restEncoder, s);
+  }
+
+  /**
+   * @param {boolean} isYKey
+   */
+  writeParentInfo (isYKey) {
+    encoding.writeVarUint(this.restEncoder, isYKey ? 1 : 0);
+  }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeTypeRef (info) {
+    encoding.writeVarUint(this.restEncoder, info);
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @param {number} len
+   */
+  writeLen (len) {
+    encoding.writeVarUint(this.restEncoder, len);
+  }
+
+  /**
+   * @param {any} any
+   */
+  writeAny (any) {
+    encoding.writeAny(this.restEncoder, any);
+  }
+
+  /**
+   * @param {Uint8Array} buf
+   */
+  writeBuf (buf) {
+    encoding.writeVarUint8Array(this.restEncoder, buf);
+  }
+
+  /**
+   * @param {any} embed
+   */
+  writeJSON (embed) {
+    encoding.writeVarString(this.restEncoder, JSON.stringify(embed));
+  }
+
+  /**
+   * @param {string} key
+   */
+  writeKey (key) {
+    encoding.writeVarString(this.restEncoder, key);
+  }
+}
+
+class DSEncoderV2 {
+  constructor () {
+    this.restEncoder = new encoding.Encoder(); // encodes all the rest / non-optimized
+    this.dsCurrVal = 0;
+  }
+
+  toUint8Array () {
+    return encoding.toUint8Array(this.restEncoder)
+  }
+
+  resetDsCurVal () {
+    this.dsCurrVal = 0;
+  }
+
+  /**
+   * @param {number} clock
+   */
+  writeDsClock (clock) {
+    const diff = clock - this.dsCurrVal;
+    this.dsCurrVal = clock;
+    encoding.writeVarUint(this.restEncoder, diff);
+  }
+
+  /**
+   * @param {number} len
+   */
+  writeDsLen (len) {
+    if (len === 0) {
+      error.unexpectedCase();
+    }
+    encoding.writeVarUint(this.restEncoder, len - 1);
+    this.dsCurrVal += len;
+  }
+}
+
+class UpdateEncoderV2 extends DSEncoderV2 {
+  constructor () {
+    super();
+    /**
+     * @type {Map<string,number>}
+     */
+    this.keyMap = new Map();
+    /**
+     * Refers to the next uniqe key-identifier to me used.
+     * See writeKey method for more information.
+     *
+     * @type {number}
+     */
+    this.keyClock = 0;
+    this.keyClockEncoder = new encoding.IntDiffOptRleEncoder();
+    this.clientEncoder = new encoding.UintOptRleEncoder();
+    this.leftClockEncoder = new encoding.IntDiffOptRleEncoder();
+    this.rightClockEncoder = new encoding.IntDiffOptRleEncoder();
+    this.infoEncoder = new encoding.RleEncoder(encoding.writeUint8);
+    this.stringEncoder = new encoding.StringEncoder();
+    this.parentInfoEncoder = new encoding.RleEncoder(encoding.writeUint8);
+    this.typeRefEncoder = new encoding.UintOptRleEncoder();
+    this.lenEncoder = new encoding.UintOptRleEncoder();
+  }
+
+  toUint8Array () {
+    const encoder = encoding.createEncoder();
+    encoding.writeUint8(encoder, 0); // this is a feature flag that we might use in the future
+    encoding.writeVarUint8Array(encoder, this.keyClockEncoder.toUint8Array());
+    encoding.writeVarUint8Array(encoder, this.clientEncoder.toUint8Array());
+    encoding.writeVarUint8Array(encoder, this.leftClockEncoder.toUint8Array());
+    encoding.writeVarUint8Array(encoder, this.rightClockEncoder.toUint8Array());
+    encoding.writeVarUint8Array(encoder, encoding.toUint8Array(this.infoEncoder));
+    encoding.writeVarUint8Array(encoder, this.stringEncoder.toUint8Array());
+    encoding.writeVarUint8Array(encoder, encoding.toUint8Array(this.parentInfoEncoder));
+    encoding.writeVarUint8Array(encoder, this.typeRefEncoder.toUint8Array());
+    encoding.writeVarUint8Array(encoder, this.lenEncoder.toUint8Array());
+    // @note The rest encoder is appended! (note the missing var)
+    encoding.writeUint8Array(encoder, encoding.toUint8Array(this.restEncoder));
+    return encoding.toUint8Array(encoder)
+  }
+
+  /**
+   * @param {ID} id
+   */
+  writeLeftID (id) {
+    this.clientEncoder.write(id.client);
+    this.leftClockEncoder.write(id.clock);
+  }
+
+  /**
+   * @param {ID} id
+   */
+  writeRightID (id) {
+    this.clientEncoder.write(id.client);
+    this.rightClockEncoder.write(id.clock);
+  }
+
+  /**
+   * @param {number} client
+   */
+  writeClient (client) {
+    this.clientEncoder.write(client);
+  }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeInfo (info) {
+    this.infoEncoder.write(info);
+  }
+
+  /**
+   * @param {string} s
+   */
+  writeString (s) {
+    this.stringEncoder.write(s);
+  }
+
+  /**
+   * @param {boolean} isYKey
+   */
+  writeParentInfo (isYKey) {
+    this.parentInfoEncoder.write(isYKey ? 1 : 0);
+  }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeTypeRef (info) {
+    this.typeRefEncoder.write(info);
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @param {number} len
+   */
+  writeLen (len) {
+    this.lenEncoder.write(len);
+  }
+
+  /**
+   * @param {any} any
+   */
+  writeAny (any) {
+    encoding.writeAny(this.restEncoder, any);
+  }
+
+  /**
+   * @param {Uint8Array} buf
+   */
+  writeBuf (buf) {
+    encoding.writeVarUint8Array(this.restEncoder, buf);
+  }
+
+  /**
+   * This is mainly here for legacy purposes.
+   *
+   * Initial we incoded objects using JSON. Now we use the much faster lib0/any-encoder. This method mainly exists for legacy purposes for the v1 encoder.
+   *
+   * @param {any} embed
+   */
+  writeJSON (embed) {
+    encoding.writeAny(this.restEncoder, embed);
+  }
+
+  /**
+   * Property keys are often reused. For example, in y-prosemirror the key `bold` might
+   * occur very often. For a 3d application, the key `position` might occur very often.
+   *
+   * We cache these keys in a Map and refer to them via a unique number.
+   *
+   * @param {string} key
+   */
+  writeKey (key) {
+    const clock = this.keyMap.get(key);
+    if (clock === undefined) {
+      this.keyClockEncoder.write(this.keyClock++);
+      this.stringEncoder.write(key);
+    } else {
+      this.keyClockEncoder.write(this.keyClock++);
+    }
+  }
+}
+
+let DefaultDSEncoder = DSEncoderV1;
+let DefaultDSDecoder = DSDecoderV1;
+let DefaultUpdateEncoder = UpdateEncoderV1;
+let DefaultUpdateDecoder = UpdateDecoderV1;
+
 /**
- * @param {encoding.Encoder} encoder
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Array<GC|Item>} structs All structs by `client`
  * @param {number} client
  * @param {number} clock write structs starting with `ID(client,clock)`
@@ -510,8 +1131,9 @@ const writeStructs = (encoder, structs, client, clock) => {
   // write first id
   const startNewStructs = findIndexSS(structs, clock);
   // write # encoded structs
-  encoding.writeVarUint(encoder, structs.length - startNewStructs);
-  writeID(encoder, createID(client, clock));
+  encoding.writeVarUint(encoder.restEncoder, structs.length - startNewStructs);
+  encoder.writeClient(client);
+  encoding.writeVarUint(encoder.restEncoder, clock);
   const firstStruct = structs[startNewStructs];
   // write first struct with an offset
   firstStruct.write(encoder, clock - firstStruct.id.clock);
@@ -521,7 +1143,7 @@ const writeStructs = (encoder, structs, client, clock) => {
 };
 
 /**
- * @param {encoding.Encoder} encoder
+ * @param {AbstractUpdateEncoder} encoder
  * @param {StructStore} store
  * @param {Map<number,number>} _sm
  *
@@ -543,7 +1165,7 @@ const writeClientsStructs = (encoder, store, _sm) => {
     }
   });
   // write # states that were updated
-  encoding.writeVarUint(encoder, sm.size);
+  encoding.writeVarUint(encoder.restEncoder, sm.size);
   // Write items with higher client ids first
   // This heavily improves the conflict algorithm.
   Array.from(sm.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
@@ -553,7 +1175,7 @@ const writeClientsStructs = (encoder, store, _sm) => {
 };
 
 /**
- * @param {decoding.Decoder} decoder The decoder object to read data from.
+ * @param {AbstractUpdateDecoder} decoder The decoder object to read data from.
  * @param {Map<number,Array<GC|Item>>} clientRefs
  * @param {Doc} doc
  * @return {Map<number,Array<GC|Item>>}
@@ -562,22 +1184,74 @@ const writeClientsStructs = (encoder, store, _sm) => {
  * @function
  */
 const readClientsStructRefs = (decoder, clientRefs, doc) => {
-  const numOfStateUpdates = decoding.readVarUint(decoder);
+  const numOfStateUpdates = decoding.readVarUint(decoder.restDecoder);
   for (let i = 0; i < numOfStateUpdates; i++) {
-    const numberOfStructs = decoding.readVarUint(decoder);
+    const numberOfStructs = decoding.readVarUint(decoder.restDecoder);
     /**
      * @type {Array<GC|Item>}
      */
-    const refs = [];
-    let { client, clock } = readID(decoder);
-    let info, struct;
+    const refs = new Array(numberOfStructs);
+    const client = decoder.readClient();
+    let clock = decoding.readVarUint(decoder.restDecoder);
+    // const start = performance.now()
     clientRefs.set(client, refs);
     for (let i = 0; i < numberOfStructs; i++) {
-      info = decoding.readUint8(decoder);
-      struct = (binary.BITS5 & info) === 0 ? new GC(createID(client, clock), decoding.readVarUint(decoder)) : readItem(decoder, createID(client, clock), info, doc);
-      refs.push(struct);
-      clock += struct.length;
+      const info = decoder.readInfo();
+      if ((binary.BITS5 & info) !== 0) {
+        /**
+         * The optimized implementation doesn't use any variables because inlining variables is faster.
+         * Below a non-optimized version is shown that implements the basic algorithm with
+         * a few comments
+         */
+        const cantCopyParentInfo = (info & (binary.BIT7 | binary.BIT8)) === 0;
+        // If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
+        // and we read the next string as parentYKey.
+        // It indicates how we store/retrieve parent from `y.share`
+        // @type {string|null}
+        const struct = new Item(
+          createID(client, clock),
+          null, // leftd
+          (info & binary.BIT8) === binary.BIT8 ? decoder.readLeftID() : null, // origin
+          null, // right
+          (info & binary.BIT7) === binary.BIT7 ? decoder.readRightID() : null, // right origin
+          cantCopyParentInfo ? (decoder.readParentInfo() ? doc.get(decoder.readString()) : decoder.readLeftID()) : null, // parent
+          cantCopyParentInfo && (info & binary.BIT6) === binary.BIT6 ? decoder.readString() : null, // parentSub
+          readItemContent(decoder, info) // item content
+        );
+        /* A non-optimized implementation of the above algorithm:
+
+        // The item that was originally to the left of this item.
+        const origin = (info & binary.BIT8) === binary.BIT8 ? decoder.readLeftID() : null
+        // The item that was originally to the right of this item.
+        const rightOrigin = (info & binary.BIT7) === binary.BIT7 ? decoder.readRightID() : null
+        const cantCopyParentInfo = (info & (binary.BIT7 | binary.BIT8)) === 0
+        const hasParentYKey = cantCopyParentInfo ? decoder.readParentInfo() : false
+        // If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
+        // and we read the next string as parentYKey.
+        // It indicates how we store/retrieve parent from `y.share`
+        // @type {string|null}
+        const parentYKey = cantCopyParentInfo && hasParentYKey ? decoder.readString() : null
+
+        const struct = new Item(
+          createID(client, clock),
+          null, // leftd
+          origin, // origin
+          null, // right
+          rightOrigin, // right origin
+          cantCopyParentInfo && !hasParentYKey ? decoder.readLeftID() : (parentYKey !== null ? doc.get(parentYKey) : null), // parent
+          cantCopyParentInfo && (info & binary.BIT6) === binary.BIT6 ? decoder.readString() : null, // parentSub
+          readItemContent(decoder, info) // item content
+        )
+        */
+        refs[i] = struct;
+        clock += struct.length;
+      } else {
+        const len = decoder.readLen();
+        refs[i] = new GC(createID(client, clock), len);
+        clock += len;
+      }
     }
+    // console.log('time to read: ', performance.now() - start) // @todo remove
   }
   return clientRefs
 };
@@ -608,41 +1282,55 @@ const readClientsStructRefs = (decoder, clientRefs, doc) => {
  * @function
  */
 const resumeStructIntegration = (transaction, store) => {
-  const stack = store.pendingStack;
+  const stack = store.pendingStack; // @todo don't forget to append stackhead at the end
   const clientsStructRefs = store.pendingClientsStructRefs;
   // sort them so that we take the higher id first, in case of conflicts the lower id will probably not conflict with the id from the higher user.
   const clientsStructRefsIds = Array.from(clientsStructRefs.keys()).sort((a, b) => a - b);
-  let curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
-  // iterate over all struct readers until we are done
-  while (stack.length !== 0 || clientsStructRefsIds.length > 0) {
-    if (stack.length === 0) {
-      // take any first struct from clientsStructRefs and put it on the stack
-      if (curStructsTarget.i < curStructsTarget.refs.length) {
-        stack.push(curStructsTarget.refs[curStructsTarget.i++]);
+  if (clientsStructRefsIds.length === 0) {
+    return
+  }
+  const getNextStructTarget = () => {
+    let nextStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
+    while (nextStructsTarget.refs.length === nextStructsTarget.i) {
+      clientsStructRefsIds.pop();
+      if (clientsStructRefsIds.length > 0) {
+        nextStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
       } else {
-        clientsStructRefsIds.pop();
-        if (clientsStructRefsIds.length > 0) {
-          curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
-        }
-        continue
+        store.pendingClientsStructRefs.clear();
+        return null
       }
     }
-    const ref = stack[stack.length - 1];
-    const refID = ref.id;
-    const client = refID.client;
-    const refClock = refID.clock;
-    const localClock = getState(store, client);
-    const offset = refClock < localClock ? localClock - refClock : 0;
-    if (refClock + offset !== localClock) {
+    return nextStructsTarget
+  };
+  let curStructsTarget = getNextStructTarget();
+  if (curStructsTarget === null && stack.length === 0) {
+    return
+  }
+  /**
+   * @type {GC|Item}
+   */
+  let stackHead = stack.length > 0
+    ? /** @type {GC|Item} */ (stack.pop())
+    : /** @type {any} */ (curStructsTarget).refs[/** @type {any} */ (curStructsTarget).i++];
+  // caching the state because it is used very often
+  const state = new Map();
+  // iterate over all struct readers until we are done
+  while (true) {
+    const localClock = map.setIfUndefined(state, stackHead.id.client, () => getState(store, stackHead.id.client));
+    const offset = stackHead.id.clock < localClock ? localClock - stackHead.id.clock : 0;
+    if (stackHead.id.clock + offset !== localClock) {
       // A previous message from this client is missing
       // check if there is a pending structRef with a smaller clock and switch them
-      const structRefs = clientsStructRefs.get(client) || { refs: [], i: 0 };
+      /**
+       * @type {{ refs: Array<GC|Item>, i: number }}
+       */
+      const structRefs = clientsStructRefs.get(stackHead.id.client) || { refs: [], i: 0 };
       if (structRefs.refs.length !== structRefs.i) {
         const r = structRefs.refs[structRefs.i];
-        if (r.id.clock < refClock) {
+        if (r.id.clock < stackHead.id.clock) {
           // put ref with smaller clock on stack instead and continue
-          structRefs.refs[structRefs.i] = ref;
-          stack[stack.length - 1] = r;
+          structRefs.refs[structRefs.i] = stackHead;
+          stackHead = r;
           // sort the set because this approach might bring the list out of order
           structRefs.refs = structRefs.refs.slice(structRefs.i).sort((r1, r2) => r1.id.clock - r2.id.clock);
           structRefs.i = 0;
@@ -650,22 +1338,42 @@ const resumeStructIntegration = (transaction, store) => {
         }
       }
       // wait until missing struct is available
+      stack.push(stackHead);
       return
     }
-    const missing = ref.getMissing(transaction, store);
-    if (missing !== null) {
+    const missing = stackHead.getMissing(transaction, store);
+    if (missing === null) {
+      if (offset === 0 || offset < stackHead.length) {
+        stackHead.integrate(transaction, offset);
+        state.set(stackHead.id.client, stackHead.id.clock + stackHead.length);
+      }
+      // iterate to next stackHead
+      if (stack.length > 0) {
+        stackHead = /** @type {GC|Item} */ (stack.pop());
+      } else if (curStructsTarget !== null && curStructsTarget.i < curStructsTarget.refs.length) {
+        stackHead = /** @type {GC|Item} */ (curStructsTarget.refs[curStructsTarget.i++]);
+      } else {
+        curStructsTarget = getNextStructTarget();
+        if (curStructsTarget === null) {
+          // we are done!
+          break
+        } else {
+          stackHead = /** @type {GC|Item} */ (curStructsTarget.refs[curStructsTarget.i++]);
+        }
+      }
+    } else {
       // get the struct reader that has the missing struct
+      /**
+       * @type {{ refs: Array<GC|Item>, i: number }}
+       */
       const structRefs = clientsStructRefs.get(missing) || { refs: [], i: 0 };
       if (structRefs.refs.length === structRefs.i) {
         // This update message causally depends on another update message.
+        stack.push(stackHead);
         return
       }
-      stack.push(structRefs.refs[structRefs.i++]);
-    } else {
-      if (offset < ref.length) {
-        ref.integrate(transaction, offset);
-      }
-      stack.pop();
+      stack.push(stackHead);
+      stackHead = structRefs.refs[structRefs.i++];
     }
   }
   store.pendingClientsStructRefs.clear();
@@ -687,7 +1395,7 @@ const tryResumePendingDeleteReaders = (transaction, store) => {
 };
 
 /**
- * @param {encoding.Encoder} encoder
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Transaction} transaction
  *
  * @private
@@ -704,7 +1412,7 @@ const writeStructsFromTransaction = (encoder, transaction) => writeClientsStruct
  */
 const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
   const pendingClientsStructRefs = store.pendingClientsStructRefs;
-  for (const [client, structRefs] of clientsStructsRefs) {
+  clientsStructsRefs.forEach((structRefs, client) => {
     const pendingStructRefs = pendingClientsStructRefs.get(client);
     if (pendingStructRefs === undefined) {
       pendingClientsStructRefs.set(client, { refs: structRefs, i: 0 });
@@ -717,7 +1425,7 @@ const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
       pendingStructRefs.i = 0;
       pendingStructRefs.refs = merged.sort((r1, r2) => r1.id.clock - r2.id.clock);
     }
-  }
+  });
 };
 
 /**
@@ -725,14 +1433,14 @@ const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
  */
 const cleanupPendingStructs = pendingClientsStructRefs => {
   // cleanup pendingClientsStructs if not fully finished
-  for (const [client, refs] of pendingClientsStructRefs) {
+  pendingClientsStructRefs.forEach((refs, client) => {
     if (refs.i === refs.refs.length) {
       pendingClientsStructRefs.delete(client);
     } else {
       refs.refs.splice(0, refs.i);
       refs.i = 0;
     }
-  }
+  });
 };
 
 /**
@@ -740,7 +1448,7 @@ const cleanupPendingStructs = pendingClientsStructRefs => {
  *
  * This is called when data is received from a remote peer.
  *
- * @param {decoding.Decoder} decoder The decoder object to read data from.
+ * @param {AbstractUpdateDecoder} decoder The decoder object to read data from.
  * @param {Transaction} transaction
  * @param {StructStore} store
  *
@@ -749,12 +1457,47 @@ const cleanupPendingStructs = pendingClientsStructRefs => {
  */
 const readStructs = (decoder, transaction, store) => {
   const clientsStructRefs = new Map();
+  // let start = performance.now()
   readClientsStructRefs(decoder, clientsStructRefs, transaction.doc);
+  // console.log('time to read structs: ', performance.now() - start) // @todo remove
+  // start = performance.now()
   mergeReadStructsIntoPendingReads(store, clientsStructRefs);
+  // console.log('time to merge: ', performance.now() - start) // @todo remove
+  // start = performance.now()
   resumeStructIntegration(transaction, store);
+  // console.log('time to integrate: ', performance.now() - start) // @todo remove
+  // start = performance.now()
   cleanupPendingStructs(store.pendingClientsStructRefs);
+  // console.log('time to cleanup: ', performance.now() - start) // @todo remove
+  // start = performance.now()
   tryResumePendingDeleteReaders(transaction, store);
+  // console.log('time to resume delete readers: ', performance.now() - start) // @todo remove
+  // start = performance.now()
 };
+
+/**
+ * Read and apply a document update.
+ *
+ * This function has the same effect as `applyUpdate` but accepts an decoder.
+ *
+ * @param {decoding.Decoder} decoder
+ * @param {Doc} ydoc
+ * @param {any} [transactionOrigin] This will be stored on `transaction.origin` and `.on('update', (update, origin))`
+ * @param {AbstractUpdateDecoder} [structDecoder]
+ *
+ * @function
+ */
+const readUpdateV2 = (decoder, ydoc, transactionOrigin, structDecoder = new UpdateDecoderV2(decoder)) =>
+  transact(ydoc, transaction => {
+    readStructs(structDecoder, transaction, ydoc.store);
+    let allowDeletes = true;
+    if (typeof transactionOrigin === 'object' && transactionOrigin && transactionOrigin.disableDeletes === true) {
+      allowDeletes = false;
+    }
+    if (allowDeletes) {
+      readAndApplyDeleteSet(structDecoder, transaction, ydoc.store);
+    }
+  }, transactionOrigin, false);
 
 /**
  * Read and apply a document update.
@@ -767,17 +1510,24 @@ const readStructs = (decoder, transaction, store) => {
  *
  * @function
  */
-const readUpdate = (decoder, ydoc, transactionOrigin) =>
-  transact(ydoc, transaction => {
-    readStructs(decoder, transaction, ydoc.store);
-    let allowDeletes = true;
-    if (typeof transactionOrigin === 'object' && transactionOrigin && transactionOrigin.disableDeletes === true) {
-      allowDeletes = false;
-    }
-    if (allowDeletes) {
-      readAndApplyDeleteSet(decoder, transaction, ydoc.store);
-    }
-  }, transactionOrigin, false);
+const readUpdate = (decoder, ydoc, transactionOrigin) => readUpdateV2(decoder, ydoc, transactionOrigin, new DefaultUpdateDecoder(decoder));
+
+/**
+ * Apply a document update created by, for example, `y.on('update', update => ..)` or `update = encodeStateAsUpdate()`.
+ *
+ * This function has the same effect as `readUpdate` but accepts an Uint8Array instead of a Decoder.
+ *
+ * @param {Doc} ydoc
+ * @param {Uint8Array} update
+ * @param {any} [transactionOrigin] This will be stored on `transaction.origin` and `.on('update', (update, origin))`
+ * @param {typeof UpdateDecoderV1 | typeof UpdateDecoderV2} [YDecoder]
+ *
+ * @function
+ */
+const applyUpdateV2 = (ydoc, update, transactionOrigin, YDecoder = UpdateDecoderV2) => {
+  const decoder = decoding.createDecoder(update);
+  readUpdateV2(decoder, ydoc, transactionOrigin, new YDecoder(decoder));
+};
 
 /**
  * Apply a document update created by, for example, `y.on('update', update => ..)` or `update = encodeStateAsUpdate()`.
@@ -790,14 +1540,13 @@ const readUpdate = (decoder, ydoc, transactionOrigin) =>
  *
  * @function
  */
-const applyUpdate = (ydoc, update, transactionOrigin) =>
-  readUpdate(decoding.createDecoder(update), ydoc, transactionOrigin);
+const applyUpdate = (ydoc, update, transactionOrigin) => applyUpdateV2(ydoc, update, transactionOrigin, DefaultUpdateDecoder);
 
 /**
  * Write all the document as a single update message. If you specify the state of the remote client (`targetStateVector`) it will
  * only write the operations that are missing.
  *
- * @param {encoding.Encoder} encoder
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Doc} doc
  * @param {Map<number,number>} [targetStateVector] The state of the target that receives the update. Leave empty to write all known structs
  *
@@ -816,31 +1565,45 @@ const writeStateAsUpdate = (encoder, doc, targetStateVector = new Map()) => {
  *
  * @param {Doc} doc
  * @param {Uint8Array} [encodedTargetStateVector] The state of the target that receives the update. Leave empty to write all known structs
+ * @param {AbstractUpdateEncoder} [encoder]
  * @return {Uint8Array}
  *
  * @function
  */
-const encodeStateAsUpdate = (doc, encodedTargetStateVector) => {
-  const encoder = encoding.createEncoder();
+const encodeStateAsUpdateV2 = (doc, encodedTargetStateVector, encoder = new UpdateEncoderV2()) => {
   const targetStateVector = encodedTargetStateVector == null ? new Map() : decodeStateVector(encodedTargetStateVector);
   writeStateAsUpdate(encoder, doc, targetStateVector);
-  return encoding.toUint8Array(encoder)
+  return encoder.toUint8Array()
 };
+
+/**
+ * Write all the document as a single update message that can be applied on the remote document. If you specify the state of the remote client (`targetState`) it will
+ * only write the operations that are missing.
+ *
+ * Use `writeStateAsUpdate` instead if you are working with lib0/encoding.js#Encoder
+ *
+ * @param {Doc} doc
+ * @param {Uint8Array} [encodedTargetStateVector] The state of the target that receives the update. Leave empty to write all known structs
+ * @return {Uint8Array}
+ *
+ * @function
+ */
+const encodeStateAsUpdate = (doc, encodedTargetStateVector) => encodeStateAsUpdateV2(doc, encodedTargetStateVector, new DefaultUpdateEncoder());
 
 /**
  * Read state vector from Decoder and return as Map
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractDSDecoder} decoder
  * @return {Map<number,number>} Maps `client` to the number next expected `clock` from that client.
  *
  * @function
  */
 const readStateVector = decoder => {
   const ss = new Map();
-  const ssLength = decoding.readVarUint(decoder);
+  const ssLength = decoding.readVarUint(decoder.restDecoder);
   for (let i = 0; i < ssLength; i++) {
-    const client = decoding.readVarUint(decoder);
-    const clock = decoding.readVarUint(decoder);
+    const client = decoding.readVarUint(decoder.restDecoder);
+    const clock = decoding.readVarUint(decoder.restDecoder);
     ss.set(client, clock);
   }
   return ss
@@ -854,28 +1617,34 @@ const readStateVector = decoder => {
  *
  * @function
  */
-const decodeStateVector = decodedState => readStateVector(decoding.createDecoder(decodedState));
+const decodeStateVectorV2 = decodedState => readStateVector(new DSDecoderV2(decoding.createDecoder(decodedState)));
 
 /**
- * Write State Vector to `lib0/encoding.js#Encoder`.
+ * Read decodedState and return State as Map.
  *
- * @param {encoding.Encoder} encoder
+ * @param {Uint8Array} decodedState
+ * @return {Map<number,number>} Maps `client` to the number next expected `clock` from that client.
+ *
+ * @function
+ */
+const decodeStateVector = decodedState => readStateVector(new DefaultDSDecoder(decoding.createDecoder(decodedState)));
+
+/**
+ * @param {AbstractDSEncoder} encoder
  * @param {Map<number,number>} sv
  * @function
  */
 const writeStateVector = (encoder, sv) => {
-  encoding.writeVarUint(encoder, sv.size);
+  encoding.writeVarUint(encoder.restEncoder, sv.size);
   sv.forEach((clock, client) => {
-    encoding.writeVarUint(encoder, client);
-    encoding.writeVarUint(encoder, clock);
+    encoding.writeVarUint(encoder.restEncoder, client); // @todo use a special client decoder that is based on mapping
+    encoding.writeVarUint(encoder.restEncoder, clock);
   });
   return encoder
 };
 
 /**
- * Write State Vector to `lib0/encoding.js#Encoder`.
- *
- * @param {encoding.Encoder} encoder
+ * @param {AbstractDSEncoder} encoder
  * @param {Doc} doc
  *
  * @function
@@ -886,15 +1655,25 @@ const writeDocumentStateVector = (encoder, doc) => writeStateVector(encoder, get
  * Encode State as Uint8Array.
  *
  * @param {Doc} doc
+ * @param {AbstractDSEncoder} [encoder]
  * @return {Uint8Array}
  *
  * @function
  */
-const encodeStateVector = doc => {
-  const encoder = encoding.createEncoder();
+const encodeStateVectorV2 = (doc, encoder = new DSEncoderV2()) => {
   writeDocumentStateVector(encoder, doc);
-  return encoding.toUint8Array(encoder)
+  return encoder.toUint8Array()
 };
+
+/**
+ * Encode State as Uint8Array.
+ *
+ * @param {Doc} doc
+ * @return {Uint8Array}
+ *
+ * @function
+ */
+const encodeStateVector = doc => encodeStateVectorV2(doc, new DefaultDSEncoder());
 
 /**
  * General event handler implementation.
@@ -1041,7 +1820,7 @@ const readID = decoder =>
  */
 const findRootTypeKey = type => {
   // @ts-ignore _y must be defined, otherwise unexpected case
-  for (const [key, value] of type.doc.share) {
+  for (const [key, value] of type.doc.share.entries()) {
     if (value === type) {
       return key
     }
@@ -1067,6 +1846,24 @@ const isParentOf = (parent, child) => {
     child = /** @type {AbstractType<any>} */ (child.parent)._item;
   }
   return false
+};
+
+/**
+ * Convenient helper to log type information.
+ *
+ * Do not use in productive systems as the output can be immense!
+ *
+ * @param {AbstractType<any>} type
+ */
+const logType = type => {
+  const res = [];
+  let n = type._start;
+  while (n) {
+    res.push(n);
+    n = n.right;
+  }
+  console.log('Children: ', res);
+  console.log('Children content: ', res.filter(m => !m.deleted).map(m => m.content));
 };
 
 class PermanentUserData {
@@ -1103,12 +1900,12 @@ class PermanentUserData {
         event.changes.added.forEach(item => {
           item.content.getContent().forEach(encodedDs => {
             if (encodedDs instanceof Uint8Array) {
-              this.dss.set(userDescription, mergeDeleteSets([this.dss.get(userDescription) || createDeleteSet(), readDeleteSet(decoding.createDecoder(encodedDs))]));
+              this.dss.set(userDescription, mergeDeleteSets([this.dss.get(userDescription) || createDeleteSet(), readDeleteSet(new DSDecoderV1(decoding.createDecoder(encodedDs)))]));
             }
           });
         });
       });
-      this.dss.set(userDescription, mergeDeleteSets(ds.map(encodedDs => readDeleteSet(decoding.createDecoder(encodedDs)))));
+      this.dss.set(userDescription, mergeDeleteSets(ds.map(encodedDs => readDeleteSet(new DSDecoderV1(encodedDs)))));
       ids.observe(/** @param {YArrayEvent<any>} event */ event =>
         event.changes.added.forEach(item => item.content.getContent().forEach(addClientId))
       );
@@ -1154,11 +1951,11 @@ class PermanentUserData {
               user.get('ids').push([clientid]);
             }
           });
-          const encoder = encoding.createEncoder();
+          const encoder = new DSEncoderV1();
           const ds = this.dss.get(userDescription);
           if (ds) {
             writeDeleteSet(encoder, ds);
-            user.get('ds').push([encoding.toUint8Array(encoder)]);
+            user.get('ds').push([encoder.toUint8Array()]);
           }
         }
       }, 0);
@@ -1168,9 +1965,9 @@ class PermanentUserData {
         const yds = user.get('ds');
         const ds = transaction.deleteSet;
         if (transaction.local && ds.clients.size > 0 && filter(transaction, ds)) {
-          const encoder = encoding.createEncoder();
+          const encoder = new DSEncoderV1();
           writeDeleteSet(encoder, ds);
-          yds.push([encoding.toUint8Array(encoder)]);
+          yds.push([encoder.toUint8Array()]);
         }
       });
     });
@@ -1189,7 +1986,7 @@ class PermanentUserData {
    * @return {string | null}
    */
   getUserByDeletedId (id) {
-    for (const [userDescription, ds] of this.dss) {
+    for (const [userDescription, ds] of this.dss.entries()) {
       if (isDeleted(ds, id)) {
         return userDescription
       }
@@ -1468,12 +2265,12 @@ const equalSnapshots = (snap1, snap2) => {
   if (sv1.size !== sv2.size || ds1.size !== ds2.size) {
     return false
   }
-  for (const [key, value] of sv1) {
+  for (const [key, value] of sv1.entries()) {
     if (sv2.get(key) !== value) {
       return false
     }
   }
-  for (const [client, dsitems1] of ds1) {
+  for (const [client, dsitems1] of ds1.entries()) {
     const dsitems2 = ds2.get(client) || [];
     if (dsitems1.length !== dsitems2.length) {
       return false
@@ -1491,23 +2288,35 @@ const equalSnapshots = (snap1, snap2) => {
 
 /**
  * @param {Snapshot} snapshot
+ * @param {AbstractDSEncoder} [encoder]
  * @return {Uint8Array}
  */
-const encodeSnapshot = snapshot => {
-  const encoder = encoding.createEncoder();
+const encodeSnapshotV2 = (snapshot, encoder = new DSEncoderV2()) => {
   writeDeleteSet(encoder, snapshot.ds);
   writeStateVector(encoder, snapshot.sv);
-  return encoding.toUint8Array(encoder)
+  return encoder.toUint8Array()
+};
+
+/**
+ * @param {Snapshot} snapshot
+ * @return {Uint8Array}
+ */
+const encodeSnapshot = snapshot => encodeSnapshotV2(snapshot, new DefaultDSEncoder());
+
+/**
+ * @param {Uint8Array} buf
+ * @param {AbstractDSDecoder} [decoder]
+ * @return {Snapshot}
+ */
+const decodeSnapshotV2 = (buf, decoder = new DSDecoderV2(decoding.createDecoder(buf))) => {
+  return new Snapshot(readDeleteSet(decoder), readStateVector(decoder))
 };
 
 /**
  * @param {Uint8Array} buf
  * @return {Snapshot}
  */
-const decodeSnapshot = buf => {
-  const decoder = decoding.createDecoder(buf);
-  return new Snapshot(readDeleteSet(decoder), readStateVector(decoder))
-};
+const decodeSnapshot = buf => decodeSnapshotV2(buf, new DSDecoderV1(decoding.createDecoder(buf)));
 
 /**
  * @param {DeleteSet} ds
@@ -1576,7 +2385,7 @@ class StructStore {
      */
     this.pendingStack = [];
     /**
-     * @type {Array<decoding.Decoder>}
+     * @type {Array<DSDecoderV2>}
      */
     this.pendingDeleteReaders = [];
   }
@@ -1886,17 +2695,18 @@ class Transaction {
 }
 
 /**
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Transaction} transaction
+ * @return {boolean} Whether data was written.
  */
-const computeUpdateMessageFromTransaction = transaction => {
+const writeUpdateMessageFromTransaction = (encoder, transaction) => {
   if (transaction.deleteSet.clients.size === 0 && !map.any(transaction.afterState, (clock, client) => transaction.beforeState.get(client) !== clock)) {
-    return null
+    return false
   }
-  const encoder = encoding.createEncoder();
   sortAndMergeDeleteSet(transaction.deleteSet);
   writeStructsFromTransaction(encoder, transaction);
   writeDeleteSet(encoder, transaction.deleteSet);
-  return encoder
+  return true
 };
 
 /**
@@ -1937,7 +2747,7 @@ const tryToMergeWithLeft = (structs, pos) => {
  * @param {function(Item):boolean} gcFilter
  */
 const tryGcDeleteSet = (ds, store, gcFilter) => {
-  for (const [client, deleteItems] of ds.clients) {
+  for (const [client, deleteItems] of ds.clients.entries()) {
     const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di];
@@ -1966,7 +2776,7 @@ const tryGcDeleteSet = (ds, store, gcFilter) => {
 const tryMergeDeleteSet = (ds, store) => {
   // try to merge deleted / gc'd items
   // merge from right to left for better efficiecy and so we don't miss any merge targets
-  for (const [client, deleteItems] of ds.clients) {
+  ds.clients.forEach((deleteItems, client) => {
     const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di];
@@ -1980,7 +2790,7 @@ const tryMergeDeleteSet = (ds, store) => {
         tryToMergeWithLeft(structs, si);
       }
     }
-  }
+  });
 };
 
 /**
@@ -2058,7 +2868,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
       tryMergeDeleteSet(ds, store);
 
       // on all affected store.clients props, try to merge
-      for (const [client, clock] of transaction.afterState) {
+      transaction.afterState.forEach((clock, client) => {
         const beforeClock = transaction.beforeState.get(client) || 0;
         if (beforeClock !== clock) {
           const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
@@ -2068,7 +2878,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
             tryToMergeWithLeft(structs, i);
           }
         }
-      }
+      });
       // try to merge mergeStructs
       // @todo: it makes more sense to transform mergeStructs to a DS, sort it, and merge from right to left
       //        but at the moment DS does not handle duplicates
@@ -2090,9 +2900,17 @@ const cleanupTransactions = (transactionCleanups, i) => {
       // @todo Merge all the transactions into one and provide send the data as a single update message
       doc.emit('afterTransactionCleanup', [transaction, doc]);
       if (doc._observers.has('update')) {
-        const updateMessage = computeUpdateMessageFromTransaction(transaction);
-        if (updateMessage !== null) {
-          doc.emit('update', [encoding.toUint8Array(updateMessage), transaction.origin, doc]);
+        const encoder = new DefaultUpdateEncoder();
+        const hasContent = writeUpdateMessageFromTransaction(encoder, transaction);
+        if (hasContent) {
+          doc.emit('update', [encoder.toUint8Array(), transaction.origin, doc]);
+        }
+      }
+      if (doc._observers.has('updateV2')) {
+        const encoder = new UpdateEncoderV2();
+        const hasContent = writeUpdateMessageFromTransaction(encoder, transaction);
+        if (hasContent) {
+          doc.emit('updateV2', [encoder.toUint8Array(), transaction.origin, doc]);
         }
       }
       if (transactionCleanups.length <= i + 1) {
@@ -2633,6 +3451,196 @@ const getPathTo = (parent, child) => {
   return path
 };
 
+const maxSearchMarker = 80;
+
+/**
+ * A unique timestamp that identifies each marker.
+ *
+ * Time is relative,.. this is more like an ever-increasing clock.
+ *
+ * @type {number}
+ */
+let globalSearchMarkerTimestamp = 0;
+
+class ArraySearchMarker {
+  /**
+   * @param {Item} p
+   * @param {number} index
+   */
+  constructor (p, index) {
+    p.marker = true;
+    this.p = p;
+    this.index = index;
+    this.timestamp = globalSearchMarkerTimestamp++;
+  }
+}
+
+/**
+ * @param {ArraySearchMarker} marker
+ */
+const refreshMarkerTimestamp = marker => { marker.timestamp = globalSearchMarkerTimestamp++; };
+
+/**
+ * This is rather complex so this function is the only thing that should overwrite a marker
+ *
+ * @param {ArraySearchMarker} marker
+ * @param {Item} p
+ * @param {number} index
+ */
+const overwriteMarker = (marker, p, index) => {
+  marker.p.marker = false;
+  marker.p = p;
+  p.marker = true;
+  marker.index = index;
+  marker.timestamp = globalSearchMarkerTimestamp++;
+};
+
+/**
+ * @param {Array<ArraySearchMarker>} searchMarker
+ * @param {Item} p
+ * @param {number} index
+ */
+const markPosition = (searchMarker, p, index) => {
+  if (searchMarker.length >= maxSearchMarker) {
+    // override oldest marker (we don't want to create more objects)
+    const marker = searchMarker.reduce((a, b) => a.timestamp < b.timestamp ? a : b);
+    overwriteMarker(marker, p, index);
+    return marker
+  } else {
+    // create new marker
+    const pm = new ArraySearchMarker(p, index);
+    searchMarker.push(pm);
+    return pm
+  }
+};
+
+/**
+ * Search marker help us to find positions in the associative array faster.
+ *
+ * They speed up the process of finding a position without much bookkeeping.
+ *
+ * A maximum of `maxSearchMarker` objects are created.
+ *
+ * This function always returns a refreshed marker (updated timestamp)
+ *
+ * @param {AbstractType<any>} yarray
+ * @param {number} index
+ */
+const findMarker = (yarray, index) => {
+  if (yarray._start === null || index === 0 || yarray._searchMarker === null) {
+    return null
+  }
+  const marker = yarray._searchMarker.length === 0 ? null : yarray._searchMarker.reduce((a, b) => math.abs(index - a.index) < math.abs(index - b.index) ? a : b);
+  let p = yarray._start;
+  let pindex = 0;
+  if (marker !== null) {
+    p = marker.p;
+    pindex = marker.index;
+    refreshMarkerTimestamp(marker); // we used it, we might need to use it again
+  }
+  // iterate to right if possible
+  while (p.right !== null && pindex < index) {
+    if (!p.deleted && p.countable) {
+      if (index < pindex + p.length) {
+        break
+      }
+      pindex += p.length;
+    }
+    p = p.right;
+  }
+  // iterate to left if necessary (might be that pindex > index)
+  while (p.left !== null && pindex > index) {
+    p = p.left;
+    if (!p.deleted && p.countable) {
+      pindex -= p.length;
+    }
+  }
+  // we want to make sure that p can't be merged with left, because that would screw up everything
+  // in that cas just return what we have (it is most likely the best marker anyway)
+  // iterate to left until p can't be merged with left
+  while (p.left !== null && p.left.id.client === p.id.client && p.left.id.clock + p.left.length === p.id.clock) {
+    p = p.left;
+    if (!p.deleted && p.countable) {
+      pindex -= p.length;
+    }
+  }
+
+  // @todo remove!
+  // assure position
+  // {
+  //   let start = yarray._start
+  //   let pos = 0
+  //   while (start !== p) {
+  //     if (!start.deleted && start.countable) {
+  //       pos += start.length
+  //     }
+  //     start = /** @type {Item} */ (start.right)
+  //   }
+  //   if (pos !== pindex) {
+  //     debugger
+  //     throw new Error('Gotcha position fail!')
+  //   }
+  // }
+  // if (marker) {
+  //   if (window.lengthes == null) {
+  //     window.lengthes = []
+  //     window.getLengthes = () => window.lengthes.sort((a, b) => a - b)
+  //   }
+  //   window.lengthes.push(marker.index - pindex)
+  //   console.log('distance', marker.index - pindex, 'len', p && p.parent.length)
+  // }
+  if (marker !== null && math.abs(marker.index - pindex) < p.parent.length / maxSearchMarker) {
+    // adjust existing marker
+    overwriteMarker(marker, p, pindex);
+    return marker
+  } else {
+    // create new marker
+    return markPosition(yarray._searchMarker, p, pindex)
+  }
+};
+
+/**
+ * Update markers when a change happened.
+ *
+ * This should be called before doing a deletion!
+ *
+ * @param {Array<ArraySearchMarker>} searchMarker
+ * @param {number} index
+ * @param {number} len If insertion, len is positive. If deletion, len is negative.
+ */
+const updateMarkerChanges = (searchMarker, index, len) => {
+  for (let i = searchMarker.length - 1; i >= 0; i--) {
+    const m = searchMarker[i];
+    if (len > 0) {
+      /**
+       * @type {Item|null}
+       */
+      let p = m.p;
+      p.marker = false;
+      // Ideally we just want to do a simple position comparison, but this will only work if
+      // search markers don't point to deleted items for formats.
+      // Iterate marker to prev undeleted countable position so we know what to do when updating a position
+      while (p && (p.deleted || !p.countable)) {
+        p = p.left;
+        if (p && !p.deleted && p.countable) {
+          // adjust position. the loop should break now
+          m.index -= p.length;
+        }
+      }
+      if (p === null || p.marker === true) {
+        // remove search marker if updated position is null or if position is already marked
+        searchMarker.splice(i, 1);
+        continue
+      }
+      m.p = p;
+      p.marker = true;
+    }
+    if (index < m.index || (len > 0 && index === m.index)) { // a simple index <= m.index check would actually suffice
+      m.index = math.max(index, m.index + len);
+    }
+  }
+};
+
 /**
  * Accumulate all (list) children of a type and return them as an Array.
  *
@@ -2705,6 +3713,10 @@ class AbstractType {
      * @type {EventHandler<Array<YEvent>,Transaction>}
      */
     this._dEH = createEventHandler();
+    /**
+     * @type {null | Array<ArraySearchMarker>}
+     */
+    this._searchMarker = null;
   }
 
   /**
@@ -2730,7 +3742,7 @@ class AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) { }
 
@@ -2752,7 +3764,11 @@ class AbstractType {
    * @param {Transaction} transaction
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
    */
-  _callObserver (transaction, parentSubs) { /* skip if no type is specified */ }
+  _callObserver (transaction, parentSubs) {
+    if (!transaction.local && this._searchMarker) {
+      this._searchMarker.length = 0;
+    }
+  }
 
   /**
    * Observe all events that are created on this type.
@@ -2943,7 +3959,13 @@ const typeListCreateIterator = type => {
  * @function
  */
 const typeListGet = (type, index) => {
-  for (let n = type._start; n !== null; n = n.right) {
+  const marker = findMarker(type, index);
+  let n = type._start;
+  if (marker !== null) {
+    n = marker.p;
+    index -= marker.index;
+  }
+  for (; n !== null; n = n.right) {
     if (!n.deleted && n.countable) {
       if (index < n.length) {
         return n.content.getContent()[index]
@@ -3020,9 +4042,24 @@ const typeListInsertGenericsAfter = (transaction, parent, referenceItem, content
  */
 const typeListInsertGenerics = (transaction, parent, index, content) => {
   if (index === 0) {
+    if (parent._searchMarker) {
+      updateMarkerChanges(parent._searchMarker, index, content.length);
+    }
     return typeListInsertGenericsAfter(transaction, parent, null, content)
   }
+  const startIndex = index;
+  const marker = findMarker(parent, index);
   let n = parent._start;
+  if (marker !== null) {
+    n = marker.p;
+    index -= marker.index;
+    // we need to iterate one to the left so that the algorithm works
+    if (index === 0) {
+      // @todo refactor this as it actually doesn't consider formats
+      n = n.prev; // important! get the left undeleted item so that we can actually decrease index
+      index += (n && n.countable && !n.deleted) ? n.length : 0;
+    }
+  }
   for (; n !== null; n = n.right) {
     if (!n.deleted && n.countable) {
       if (index <= n.length) {
@@ -3034,6 +4071,9 @@ const typeListInsertGenerics = (transaction, parent, index, content) => {
       }
       index -= n.length;
     }
+  }
+  if (parent._searchMarker) {
+    updateMarkerChanges(parent._searchMarker, startIndex, content.length);
   }
   return typeListInsertGenericsAfter(transaction, parent, n, content)
 };
@@ -3049,7 +4089,14 @@ const typeListInsertGenerics = (transaction, parent, index, content) => {
  */
 const typeListDelete = (transaction, parent, index, length) => {
   if (length === 0) { return }
+  const startIndex = index;
+  const startLength = length;
+  const marker = findMarker(parent, index);
   let n = parent._start;
+  if (marker !== null) {
+    n = marker.p;
+    index -= marker.index;
+  }
   // compute the first item to be deleted
   for (; n !== null && index > 0; n = n.right) {
     if (!n.deleted && n.countable) {
@@ -3072,6 +4119,9 @@ const typeListDelete = (transaction, parent, index, length) => {
   }
   if (length > 0) {
     throw error.create('array length exceeded')
+  }
+  if (parent._searchMarker) {
+    updateMarkerChanges(parent._searchMarker, startIndex, -startLength + length /* in case we remove the above exception */);
   }
 };
 
@@ -3154,11 +4204,11 @@ const typeMapGetAll = (parent) => {
    * @type {Object<string,any>}
    */
   const res = {};
-  for (const [key, value] of parent._map) {
+  parent._map.forEach((value, key) => {
     if (!value.deleted) {
       res[key] = value.content.getContent()[value.length - 1];
     }
-  }
+  });
   return res
 };
 
@@ -3234,6 +4284,10 @@ class YArray extends AbstractType {
      * @private
      */
     this._prelimContent = [];
+    /**
+     * @type {Array<ArraySearchMarker>}
+     */
+    this._searchMarker = [];
   }
 
   /**
@@ -3267,6 +4321,7 @@ class YArray extends AbstractType {
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
    */
   _callObserver (transaction, parentSubs) {
+    super._callObserver(transaction, parentSubs);
     callTypeObservers(this, transaction, new YArrayEvent(this, transaction));
   }
 
@@ -3388,15 +4443,15 @@ class YArray extends AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    encoding.writeVarUint(encoder, YArrayRefID);
+    encoder.writeTypeRef(YArrayRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  *
  * @private
  * @function
@@ -3457,10 +4512,10 @@ class YMap extends AbstractType {
    * @param {Item} item
    */
   _integrate (y, item) {
-    super._integrate(y, item);
-    for (const [key, value] of /** @type {Map<string, any>} */ (this._prelimContent)) {
+    super._integrate(y, item)
+    ;/** @type {Map<string, any>} */ (this._prelimContent).forEach((value, key) => {
       this.set(key, value);
-    }
+    });
     this._prelimContent = null;
   }
 
@@ -3488,12 +4543,12 @@ class YMap extends AbstractType {
      * @type {Object<string,T>}
      */
     const map = {};
-    for (const [key, item] of this._map) {
+    this._map.forEach((item, key) => {
       if (!item.deleted) {
         const v = item.content.getContent()[item.length - 1];
         map[key] = v instanceof AbstractType ? v.toJSON() : v;
       }
-    }
+    });
     return map
   }
 
@@ -3543,11 +4598,11 @@ class YMap extends AbstractType {
      * @type {Object<string,T>}
      */
     const map = {};
-    for (const [key, item] of this._map) {
+    this._map.forEach((item, key) => {
       if (!item.deleted) {
         f(item.content.getContent()[item.length - 1], key, this);
       }
-    }
+    });
     return map
   }
 
@@ -3611,15 +4666,15 @@ class YMap extends AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    encoding.writeVarUint(encoder, YMapRefID);
+    encoder.writeTypeRef(YMapRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  *
  * @private
  * @function
@@ -3633,63 +4688,79 @@ const readYMap = decoder => new YMap();
  */
 const equalAttrs = (a, b) => a === b || (typeof a === 'object' && typeof b === 'object' && a && b && object.equalFlat(a, b));
 
-class ItemListPosition {
+class ItemTextListPosition {
   /**
    * @param {Item|null} left
    * @param {Item|null} right
-   */
-  constructor (left, right) {
-    this.left = left;
-    this.right = right;
-  }
-}
-
-class ItemTextListPosition extends ItemListPosition {
-  /**
-   * @param {Item|null} left
-   * @param {Item|null} right
+   * @param {number} index
    * @param {Map<string,any>} currentAttributes
    */
-  constructor (left, right, currentAttributes) {
-    super(left, right);
+  constructor (left, right, index, currentAttributes) {
+    this.left = left;
+    this.right = right;
+    this.index = index;
     this.currentAttributes = currentAttributes;
+  }
+
+  /**
+   * Only call this if you know that this.right is defined
+   */
+  forward () {
+    if (this.right === null) {
+      error.unexpectedCase();
+    }
+    switch (this.right.content.constructor) {
+      case ContentEmbed:
+      case ContentString:
+        if (!this.right.deleted) {
+          this.index += this.right.length;
+        }
+        break
+      case ContentFormat:
+        if (!this.right.deleted) {
+          updateCurrentAttributes(this.currentAttributes, /** @type {ContentFormat} */ (this.right.content));
+        }
+        break
+    }
+    this.left = this.right;
+    this.right = this.right.right;
   }
 }
 
 /**
  * @param {Transaction} transaction
- * @param {Map<string,any>} currentAttributes
- * @param {Item|null} left
- * @param {Item|null} right
- * @param {number} count
+ * @param {ItemTextListPosition} pos
+ * @param {number} count steps to move forward
  * @return {ItemTextListPosition}
  *
  * @private
  * @function
  */
-const findNextPosition = (transaction, currentAttributes, left, right, count) => {
-  while (right !== null && count > 0) {
-    switch (right.content.constructor) {
+const findNextPosition = (transaction, pos, count) => {
+  while (pos.right !== null && count > 0) {
+    switch (pos.right.content.constructor) {
       case ContentEmbed:
       case ContentString:
-        if (!right.deleted) {
-          if (count < right.length) {
+        if (!pos.right.deleted) {
+          if (count < pos.right.length) {
             // split right
-            getItemCleanStart(transaction, createID(right.id.client, right.id.clock + count));
+            getItemCleanStart(transaction, createID(pos.right.id.client, pos.right.id.clock + count));
           }
-          count -= right.length;
+          pos.index += pos.right.length;
+          count -= pos.right.length;
         }
         break
       case ContentFormat:
-        if (!right.deleted) {
-          updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (right.content));
+        if (!pos.right.deleted) {
+          updateCurrentAttributes(pos.currentAttributes, /** @type {ContentFormat} */ (pos.right.content));
         }
         break
     }
-    left = right;
-    right = right.right;
+    pos.left = pos.right;
+    pos.right = pos.right.right;
+    // pos.forward() - we don't forward because that would halve the performance because we already do the checks above
   }
-  return new ItemTextListPosition(left, right, currentAttributes)
+  return pos
 };
 
 /**
@@ -3703,8 +4774,14 @@ const findNextPosition = (transaction, currentAttributes, left, right, count) =>
  */
 const findPosition = (transaction, parent, index) => {
   const currentAttributes = new Map();
-  const right = parent._start;
-  return findNextPosition(transaction, currentAttributes, null, right, index)
+  const marker = findMarker(parent, index);
+  if (marker) {
+    const pos = new ItemTextListPosition(marker.p.left, marker.p, marker.index, currentAttributes);
+    return findNextPosition(transaction, pos, index - marker.index)
+  } else {
+    const pos = new ItemTextListPosition(null, parent._start, 0, currentAttributes);
+    return findNextPosition(transaction, pos, index)
+  }
 };
 
 /**
@@ -3712,37 +4789,35 @@ const findPosition = (transaction, parent, index) => {
  *
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {ItemListPosition} currPos
+ * @param {ItemTextListPosition} currPos
  * @param {Map<string,any>} negatedAttributes
  *
  * @private
  * @function
  */
 const insertNegatedAttributes = (transaction, parent, currPos, negatedAttributes) => {
-  let { left, right } = currPos;
   // check if we really need to remove attributes
   while (
-    right !== null && (
-      right.deleted === true || (
-        right.content.constructor === ContentFormat &&
-        equalAttrs(negatedAttributes.get(/** @type {ContentFormat} */ (right.content).key), /** @type {ContentFormat} */ (right.content).value)
+    currPos.right !== null && (
+      currPos.right.deleted === true || (
+        currPos.right.content.constructor === ContentFormat &&
+        equalAttrs(negatedAttributes.get(/** @type {ContentFormat} */ (currPos.right.content).key), /** @type {ContentFormat} */ (currPos.right.content).value)
       )
     )
   ) {
-    if (!right.deleted) {
-      negatedAttributes.delete(/** @type {ContentFormat} */ (right.content).key);
+    if (!currPos.right.deleted) {
+      negatedAttributes.delete(/** @type {ContentFormat} */ (currPos.right.content).key);
     }
-    left = right;
-    right = right.right;
+    currPos.forward();
   }
   const doc = transaction.doc;
   const ownClientId = doc.clientID;
-  for (const [key, val] of negatedAttributes) {
+  let left = currPos.left;
+  const right = currPos.right;
+  negatedAttributes.forEach((val, key) => {
     left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
     left.integrate(transaction, 0);
-  }
-  currPos.left = left;
-  currPos.right = right;
+  });
 };
 
 /**
@@ -3762,57 +4837,49 @@ const updateCurrentAttributes = (currentAttributes, format) => {
 };
 
 /**
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {Object<string,any>} attributes
  *
  * @private
  * @function
  */
-const minimizeAttributeChanges = (currPos, currentAttributes, attributes) => {
+const minimizeAttributeChanges = (currPos, attributes) => {
   // go right while attributes[right.key] === right.value (or right is deleted)
-  let { left, right } = currPos;
   while (true) {
-    if (right === null) {
+    if (currPos.right === null) {
       break
-    } else if (right.deleted) ; else if (right.content.constructor === ContentFormat && equalAttrs(attributes[(/** @type {ContentFormat} */ (right.content)).key] || null, /** @type {ContentFormat} */ (right.content).value)) {
-      // found a format, update currentAttributes and continue
-      updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (right.content));
-    } else {
+    } else if (currPos.right.deleted || (currPos.right.content.constructor === ContentFormat && equalAttrs(attributes[(/** @type {ContentFormat} */ (currPos.right.content)).key] || null, /** @type {ContentFormat} */ (currPos.right.content).value))) ; else {
       break
     }
-    left = right;
-    right = right.right;
+    currPos.forward();
   }
-  currPos.left = left;
-  currPos.right = right;
 };
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {Object<string,any>} attributes
  * @return {Map<string,any>}
  *
  * @private
  * @function
  **/
-const insertAttributes = (transaction, parent, currPos, currentAttributes, attributes) => {
+const insertAttributes = (transaction, parent, currPos, attributes) => {
   const doc = transaction.doc;
   const ownClientId = doc.clientID;
   const negatedAttributes = new Map();
   // insert format-start items
   for (const key in attributes) {
     const val = attributes[key];
-    const currentVal = currentAttributes.get(key) || null;
+    const currentVal = currPos.currentAttributes.get(key) || null;
     if (!equalAttrs(currentVal, val)) {
       // save negated attribute (set null if currentVal undefined)
       negatedAttributes.set(key, currentVal);
       const { left, right } = currPos;
-      currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
-      currPos.left.integrate(transaction, 0);
+      currPos.right = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
+      currPos.right.integrate(transaction, 0);
+      currPos.forward();
     }
   }
   return negatedAttributes
@@ -3821,56 +4888,59 @@ const insertAttributes = (transaction, parent, currPos, currentAttributes, attri
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {string|object} text
  * @param {Object<string,any>} attributes
  *
  * @private
  * @function
  **/
-const insertText = (transaction, parent, currPos, currentAttributes, text, attributes) => {
-  for (const [key] of currentAttributes) {
+const insertText = (transaction, parent, currPos, text, attributes) => {
+  currPos.currentAttributes.forEach((val, key) => {
     if (attributes[key] === undefined) {
       attributes[key] = null;
     }
-  }
+  });
   const doc = transaction.doc;
   const ownClientId = doc.clientID;
-  minimizeAttributeChanges(currPos, currentAttributes, attributes);
-  const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes);
+  minimizeAttributeChanges(currPos, attributes);
+  const negatedAttributes = insertAttributes(transaction, parent, currPos, attributes);
   // insert content
   const content = text.constructor === String ? new ContentString(/** @type {string} */ (text)) : new ContentEmbed(text);
-  const { left, right } = currPos;
-  currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, content);
-  currPos.left.integrate(transaction, 0);
-  return insertNegatedAttributes(transaction, parent, currPos, negatedAttributes)
+  let { left, right, index } = currPos;
+  if (parent._searchMarker) {
+    updateMarkerChanges(parent._searchMarker, currPos.index, content.getLength());
+  }
+  right = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, content);
+  right.integrate(transaction, 0);
+  currPos.right = right;
+  currPos.index = index;
+  currPos.forward();
+  insertNegatedAttributes(transaction, parent, currPos, negatedAttributes);
 };
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {number} length
  * @param {Object<string,any>} attributes
  *
  * @private
  * @function
  */
-const formatText = (transaction, parent, currPos, currentAttributes, length, attributes) => {
+const formatText = (transaction, parent, currPos, length, attributes) => {
   const doc = transaction.doc;
   const ownClientId = doc.clientID;
-  minimizeAttributeChanges(currPos, currentAttributes, attributes);
-  const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes);
-  let { left, right } = currPos;
+  minimizeAttributeChanges(currPos, attributes);
+  const negatedAttributes = insertAttributes(transaction, parent, currPos, attributes);
   // iterate until first non-format or null is found
   // delete all formats with attributes[format.key] != null
-  while (length > 0 && right !== null) {
-    if (!right.deleted) {
-      switch (right.content.constructor) {
+  while (length > 0 && currPos.right !== null) {
+    if (!currPos.right.deleted) {
+      switch (currPos.right.content.constructor) {
         case ContentFormat: {
-          const { key, value } = /** @type {ContentFormat} */ (right.content);
+          const { key, value } = /** @type {ContentFormat} */ (currPos.right.content);
           const attr = attributes[key];
           if (attr !== undefined) {
             if (equalAttrs(attr, value)) {
@@ -3878,22 +4948,20 @@ const formatText = (transaction, parent, currPos, currentAttributes, length, att
             } else {
               negatedAttributes.set(key, value);
             }
-            right.delete(transaction);
+            currPos.right.delete(transaction);
           }
-          updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (right.content));
           break
         }
         case ContentEmbed:
         case ContentString:
-          if (length < right.length) {
-            getItemCleanStart(transaction, createID(right.id.client, right.id.clock + length));
+          if (length < currPos.right.length) {
+            getItemCleanStart(transaction, createID(currPos.right.id.client, currPos.right.id.clock + length));
           }
-          length -= right.length;
+          length -= currPos.right.length;
           break
       }
     }
-    left = right;
-    right = right.right;
+    currPos.forward();
   }
   // Quill just assumes that the editor starts with a newline and that it always
   // ends with a newline. We only insert that newline when a new newline is
@@ -3903,11 +4971,10 @@ const formatText = (transaction, parent, currPos, currentAttributes, length, att
     for (; length > 0; length--) {
       newlines += '\n';
     }
-    left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentString(newlines));
-    left.integrate(transaction, 0);
+    currPos.right = new Item(createID(ownClientId, getState(doc.store, ownClientId)), currPos.left, currPos.left && currPos.left.lastId, currPos.right, currPos.right && currPos.right.id, parent, null, new ContentString(newlines));
+    currPos.right.integrate(transaction, 0);
+    currPos.forward();
   }
-  currPos.left = left;
-  currPos.right = right;
   insertNegatedAttributes(transaction, parent, currPos, negatedAttributes);
 };
 
@@ -4017,42 +5084,39 @@ const cleanupYTextFormatting = type => {
 
 /**
  * @param {Transaction} transaction
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {number} length
- * @return {ItemListPosition}
+ * @return {ItemTextListPosition}
  *
  * @private
  * @function
  */
-const deleteText = (transaction, currPos, currentAttributes, length) => {
-  const startAttrs = map.copy(currentAttributes);
+const deleteText = (transaction, currPos, length) => {
+  const startLength = length;
+  const startAttrs = map.copy(currPos.currentAttributes);
   const start = currPos.right;
-  let { left, right } = currPos;
-  while (length > 0 && right !== null) {
-    if (right.deleted === false) {
-      switch (right.content.constructor) {
-        case ContentFormat:
-          updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (right.content));
-          break
+  while (length > 0 && currPos.right !== null) {
+    if (currPos.right.deleted === false) {
+      switch (currPos.right.content.constructor) {
         case ContentEmbed:
         case ContentString:
-          if (length < right.length) {
-            getItemCleanStart(transaction, createID(right.id.client, right.id.clock + length));
+          if (length < currPos.right.length) {
+            getItemCleanStart(transaction, createID(currPos.right.id.client, currPos.right.id.clock + length));
           }
-          length -= right.length;
-          right.delete(transaction);
+          length -= currPos.right.length;
+          currPos.right.delete(transaction);
           break
       }
     }
-    left = right;
-    right = right.right;
+    currPos.forward();
   }
   if (start) {
-    cleanupFormattingGap(transaction, start, right, startAttrs, map.copy(currentAttributes));
+    cleanupFormattingGap(transaction, start, currPos.right, startAttrs, map.copy(currPos.currentAttributes));
   }
-  currPos.left = left;
-  currPos.right = right;
+  const parent = /** @type {AbstractType<any>} */ (/** @type {Item} */ (currPos.left || currPos.right).parent);
+  if (parent._searchMarker) {
+    updateMarkerChanges(parent._searchMarker, currPos.index, -startLength + length);
+  }
   return currPos
 };
 
@@ -4153,11 +5217,11 @@ class YTextEvent extends YEvent {
                 op = { insert };
                 if (currentAttributes.size > 0) {
                   op.attributes = {};
-                  for (const [key, value] of currentAttributes) {
+                  currentAttributes.forEach((value, key) => {
                     if (value !== null) {
                       op.attributes[key] = value;
                     }
-                  }
+                  });
                 }
                 insert = '';
                 break
@@ -4315,6 +5379,10 @@ class YText extends AbstractType {
      * @type {Array<function():void>?}
      */
     this._pending = string !== undefined ? [() => this.insert(0, string)] : [];
+    /**
+     * @type {Array<ArraySearchMarker>}
+     */
+    this._searchMarker = [];
   }
 
   /**
@@ -4351,20 +5419,21 @@ class YText extends AbstractType {
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
    */
   _callObserver (transaction, parentSubs) {
+    super._callObserver(transaction, parentSubs);
     const event = new YTextEvent(this, transaction);
     const doc = transaction.doc;
     // If a remote change happened, we try to cleanup potential formatting duplicates.
     if (!transaction.local) {
       // check if another formatting item was inserted
       let foundFormattingItem = false;
-      for (const [client, afterClock] of transaction.afterState) {
+      for (const [client, afterClock] of transaction.afterState.entries()) {
         const clock = transaction.beforeState.get(client) || 0;
         if (afterClock === clock) {
           continue
         }
         iterateStructs(transaction, /** @type {Array<Item|GC>} */ (doc.store.clients.get(client)), clock, afterClock, item => {
           // @ts-ignore
-          if (!item.deleted && item.content.constructor === ContentFormat) {
+          if (item.content.constructor === ContentFormat) {
             foundFormattingItem = true;
           }
         });
@@ -4372,7 +5441,17 @@ class YText extends AbstractType {
           break
         }
       }
-      transact(doc, t => {
+      if (!foundFormattingItem) {
+        iterateDeletedStructs(transaction, transaction.deleteSet, item => {
+          if (item instanceof GC || foundFormattingItem) {
+            return
+          }
+          if (item.parent === this && item.content.constructor === ContentFormat) {
+            foundFormattingItem = true;
+          }
+        });
+      }
+      transact(doc, (t) => {
         if (foundFormattingItem) {
           // If a formatting item was inserted, we simply clean the whole type.
           // We need to compute currentAttributes for the current position anyway.
@@ -4381,7 +5460,7 @@ class YText extends AbstractType {
           // If no formatting attribute was inserted, we can make due with contextless
           // formatting cleanups.
           // Contextless: it is not necessary to compute currentAttributes for the affected position.
-          iterateDeletedStructs(t, transaction.deleteSet, item => {
+          iterateDeletedStructs(t, t.deleteSet, item => {
             if (item instanceof GC) {
               return
             }
@@ -4438,11 +5517,7 @@ class YText extends AbstractType {
   applyDelta (delta, { sanitize = true } = {}) {
     if (this.doc !== null) {
       transact(this.doc, transaction => {
-        /**
-         * @type {ItemListPosition}
-         */
-        const currPos = new ItemListPosition(null, this._start);
-        const currentAttributes = new Map();
+        const currPos = new ItemTextListPosition(null, this._start, 0, new Map());
         for (let i = 0; i < delta.length; i++) {
           const op = delta[i];
           if (op.insert !== undefined) {
@@ -4453,12 +5528,12 @@ class YText extends AbstractType {
             // paragraphs, but nothing bad will happen.
             const ins = (!sanitize && typeof op.insert === 'string' && i === delta.length - 1 && currPos.right === null && op.insert.slice(-1) === '\n') ? op.insert.slice(0, -1) : op.insert;
             if (typeof ins !== 'string' || ins.length > 0) {
-              insertText(transaction, this, currPos, currentAttributes, ins, op.attributes || {});
+              insertText(transaction, this, currPos, ins, op.attributes || {});
             }
           } else if (op.retain !== undefined) {
-            formatText(transaction, this, currPos, currentAttributes, op.retain, op.attributes || {});
+            formatText(transaction, this, currPos, op.retain, op.attributes || {});
           } else if (op.delete !== undefined) {
-            deleteText(transaction, currPos, currentAttributes, op.delete);
+            deleteText(transaction, currPos, op.delete);
           }
         }
       });
@@ -4494,10 +5569,10 @@ class YText extends AbstractType {
          */
         const attributes = {};
         let addAttributes = false;
-        for (const [key, value] of currentAttributes) {
+        currentAttributes.forEach((value, key) => {
           addAttributes = true;
           attributes[key] = value;
-        }
+        });
         /**
          * @type {Object<string,any>}
          */
@@ -4551,9 +5626,9 @@ class YText extends AbstractType {
               if (currentAttributes.size > 0) {
                 const attrs = /** @type {Object<string,any>} */ ({});
                 op.attributes = attrs;
-                for (const [key, value] of currentAttributes) {
+                currentAttributes.forEach((value, key) => {
                   attrs[key] = value;
-                }
+                });
               }
               ops.push(op);
               break
@@ -4590,13 +5665,13 @@ class YText extends AbstractType {
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
-        const { left, right, currentAttributes } = findPosition(transaction, this, index);
+        const pos = findPosition(transaction, this, index);
         if (!attributes) {
           attributes = {};
           // @ts-ignore
-          currentAttributes.forEach((v, k) => { attributes[k] = v; });
+          pos.currentAttributes.forEach((v, k) => { attributes[k] = v; });
         }
-        insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, text, attributes);
+        insertText(transaction, this, pos, text, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.insert(index, text, attributes));
@@ -4620,8 +5695,8 @@ class YText extends AbstractType {
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
-        const { left, right, currentAttributes } = findPosition(transaction, this, index);
-        insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, embed, attributes);
+        const pos = findPosition(transaction, this, index);
+        insertText(transaction, this, pos, embed, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.insertEmbed(index, embed, attributes));
@@ -4643,8 +5718,7 @@ class YText extends AbstractType {
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
-        const { left, right, currentAttributes } = findPosition(transaction, this, index);
-        deleteText(transaction, new ItemListPosition(left, right), currentAttributes, length);
+        deleteText(transaction, findPosition(transaction, this, index), length);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.delete(index, length));
@@ -4668,11 +5742,11 @@ class YText extends AbstractType {
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
-        const { left, right, currentAttributes } = findPosition(transaction, this, index);
-        if (right === null) {
+        const pos = findPosition(transaction, this, index);
+        if (pos.right === null) {
           return
         }
-        formatText(transaction, this, new ItemListPosition(left, right), currentAttributes, length, attributes);
+        formatText(transaction, this, pos, length, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.format(index, length, attributes));
@@ -4680,15 +5754,15 @@ class YText extends AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    encoding.writeVarUint(encoder, YTextRefID);
+    encoder.writeTypeRef(YTextRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YText}
  *
  * @private
@@ -5005,15 +6079,15 @@ class YXmlFragment extends AbstractType {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    */
   _write (encoder) {
-    encoding.writeVarUint(encoder, YXmlFragmentRefID);
+    encoder.writeTypeRef(YXmlFragmentRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YXmlFragment}
  *
  * @private
@@ -5188,21 +6262,21 @@ class YXmlElement extends YXmlFragment {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    */
   _write (encoder) {
-    encoding.writeVarUint(encoder, YXmlElementRefID);
-    encoding.writeVarString(encoder, this.nodeName);
+    encoder.writeTypeRef(YXmlElementRefID);
+    encoder.writeKey(this.nodeName);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YXmlElement}
  *
  * @function
  */
-const readYXmlElement = decoder => new YXmlElement(decoding.readVarString(decoder));
+const readYXmlElement = decoder => new YXmlElement(decoder.readKey());
 
 /**
  * An Event that describes changes on a YXml Element or Yxml Fragment
@@ -5298,24 +6372,23 @@ class YXmlHook extends YMap {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    */
   _write (encoder) {
-    super._write(encoder);
-    encoding.writeVarUint(encoder, YXmlHookRefID);
-    encoding.writeVarString(encoder, this.hookName);
+    encoder.writeTypeRef(YXmlHookRefID);
+    encoder.writeKey(this.hookName);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YXmlHook}
  *
  * @private
  * @function
  */
 const readYXmlHook = decoder =>
-  new YXmlHook(decoding.readVarString(decoder));
+  new YXmlHook(decoder.readKey());
 
 /**
  * Represents text in a Dom Element. In the future this type will also handle
@@ -5391,15 +6464,15 @@ class YXmlText extends YText {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    encoding.writeVarUint(encoder, YXmlTextRefID);
+    encoder.writeTypeRef(YXmlTextRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YXmlText}
  *
  * @private
@@ -5436,7 +6509,7 @@ class AbstractStruct {
   }
 
   /**
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    * @param {number} offset
    * @param {number} encodingRef
    */
@@ -5487,12 +6560,12 @@ class GC extends AbstractStruct {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    encoding.writeUint8(encoder, structGCRefNumber);
-    encoding.writeVarUint(encoder, this.length - offset);
+    encoder.writeInfo(structGCRefNumber);
+    encoder.writeLen(this.length - offset);
   }
 
   /**
@@ -5571,11 +6644,11 @@ class ContentBinary {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    encoding.writeVarUint8Array(encoder, this.content);
+    encoder.writeBuf(this.content);
   }
 
   /**
@@ -5587,10 +6660,10 @@ class ContentBinary {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentBinary}
  */
-const readContentBinary = decoder => new ContentBinary(buffer.copyUint8Array(decoding.readVarUint8Array(decoder)));
+const readContentBinary = decoder => new ContentBinary(decoder.readBuf());
 
 class ContentDeleted {
   /**
@@ -5652,7 +6725,7 @@ class ContentDeleted {
    * @param {Item} item
    */
   integrate (transaction, item) {
-    addToDeleteSet(transaction.deleteSet, item.id, this.len);
+    addToDeleteSet(transaction.deleteSet, item.id.client, item.id.clock, this.len);
     item.markDeleted();
   }
 
@@ -5665,11 +6738,11 @@ class ContentDeleted {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    encoding.writeVarUint(encoder, this.len - offset);
+    encoder.writeLen(this.len - offset);
   }
 
   /**
@@ -5683,10 +6756,10 @@ class ContentDeleted {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentDeleted}
  */
-const readContentDeleted = decoder => new ContentDeleted(decoding.readVarUint(decoder));
+const readContentDeleted = decoder => new ContentDeleted(decoder.readLen());
 
 /**
  * @private
@@ -5757,11 +6830,11 @@ class ContentEmbed {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    encoding.writeVarString(encoder, JSON.stringify(this.embed));
+    encoder.writeJSON(this.embed);
   }
 
   /**
@@ -5775,10 +6848,10 @@ class ContentEmbed {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentEmbed}
  */
-const readContentEmbed = decoder => new ContentEmbed(JSON.parse(decoding.readVarString(decoder)));
+const readContentEmbed = decoder => new ContentEmbed(decoder.readJSON());
 
 /**
  * @private
@@ -5841,7 +6914,11 @@ class ContentFormat {
    * @param {Transaction} transaction
    * @param {Item} item
    */
-  integrate (transaction, item) {}
+  integrate (transaction, item) {
+    // @todo searchmarker are currently unsupported for rich text documents
+    /** @type {AbstractType<any>} */ (item.parent)._searchMarker = null;
+  }
+
   /**
    * @param {Transaction} transaction
    */
@@ -5851,12 +6928,12 @@ class ContentFormat {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    encoding.writeVarString(encoder, this.key);
-    encoding.writeVarString(encoder, JSON.stringify(this.value));
+    encoder.writeKey(this.key);
+    encoder.writeJSON(this.value);
   }
 
   /**
@@ -5868,10 +6945,10 @@ class ContentFormat {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentFormat}
  */
-const readContentFormat = decoder => new ContentFormat(decoding.readVarString(decoder), JSON.parse(decoding.readVarString(decoder)));
+const readContentFormat = decoder => new ContentFormat(decoder.readString(), decoder.readJSON());
 
 /**
  * @private
@@ -5948,15 +7025,15 @@ class ContentJSON {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
     const len = this.arr.length;
-    encoding.writeVarUint(encoder, len - offset);
+    encoder.writeLen(len - offset);
     for (let i = offset; i < len; i++) {
       const c = this.arr[i];
-      encoding.writeVarString(encoder, c === undefined ? 'undefined' : JSON.stringify(c));
+      encoder.writeString(c === undefined ? 'undefined' : JSON.stringify(c));
     }
   }
 
@@ -5971,14 +7048,14 @@ class ContentJSON {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentJSON}
  */
 const readContentJSON = decoder => {
-  const len = decoding.readVarUint(decoder);
+  const len = decoder.readLen();
   const cs = [];
   for (let i = 0; i < len; i++) {
-    const c = decoding.readVarString(decoder);
+    const c = decoder.readString();
     if (c === 'undefined') {
       cs.push(undefined);
     } else {
@@ -6060,15 +7137,15 @@ class ContentAny {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
     const len = this.arr.length;
-    encoding.writeVarUint(encoder, len - offset);
+    encoder.writeLen(len - offset);
     for (let i = offset; i < len; i++) {
       const c = this.arr[i];
-      encoding.writeAny(encoder, c);
+      encoder.writeAny(c);
     }
   }
 
@@ -6081,14 +7158,14 @@ class ContentAny {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentAny}
  */
 const readContentAny = decoder => {
-  const len = decoding.readVarUint(decoder);
+  const len = decoder.readLen();
   const cs = [];
   for (let i = 0; i < len; i++) {
-    cs.push(decoding.readAny(decoder));
+    cs.push(decoder.readAny());
   }
   return new ContentAny(cs)
 };
@@ -6168,11 +7245,11 @@ class ContentString {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    encoding.writeVarString(encoder, offset === 0 ? this.str : this.str.slice(offset));
+    encoder.writeString(offset === 0 ? this.str : this.str.slice(offset));
   }
 
   /**
@@ -6186,13 +7263,13 @@ class ContentString {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentString}
  */
-const readContentString = decoder => new ContentString(decoding.readVarString(decoder));
+const readContentString = decoder => new ContentString(decoder.readString());
 
 /**
- * @type {Array<function(decoding.Decoder):AbstractType<any>>}
+ * @type {Array<function(AbstractUpdateDecoder):AbstractType<any>>}
  * @private
  */
 const typeRefs = [
@@ -6327,7 +7404,7 @@ class ContentType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
@@ -6345,10 +7422,10 @@ class ContentType {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentType}
  */
-const readContentType = decoder => new ContentType(typeRefs[decoding.readVarUint(decoder)](decoder));
+const readContentType = decoder => new ContentType(typeRefs[decoder.readTypeRef()](decoder));
 
 /**
  * @todo This should return several items
@@ -6606,7 +7683,29 @@ class Item extends AbstractStruct {
      * @type {AbstractContent}
      */
     this.content = content;
+    /**
+     * bit1: keep
+     * bit2: countable
+     * bit3: deleted
+     * bit4: mark - mark node as fast-search-marker
+     * @type {number} byte
+     */
     this.info = this.content.isCountable() ? binary.BIT2 : 0;
+  }
+
+  /**
+   * This is used to mark the item as an indexed fast-search marker
+   *
+   * @type {boolean}
+   */
+  set marker (isMarked) {
+    if (((this.info & binary.BIT4) > 0) !== isMarked) {
+      this.info ^= binary.BIT4;
+    }
+  }
+
+  get marker () {
+    return (this.info & binary.BIT4) > 0
   }
 
   /**
@@ -6806,7 +7905,7 @@ class Item extends AbstractStruct {
       this.content.integrate(transaction, this);
       // add parent to transaction.changed
       addChangedTypeToTransaction(transaction, /** @type {AbstractType<any>} */ (this.parent), this.parentSub);
-      if ((/** @type {AbstractType<any>} */ (this.parent)._item !== null && /** @type {AbstractType<any>} */ (this.parent)._item.deleted) || (this.right !== null && this.parentSub !== null)) {
+      if ((/** @type {AbstractType<any>} */ (this.parent)._item !== null && /** @type {AbstractType<any>} */ (this.parent)._item.deleted) || (this.parentSub !== null && this.right !== null)) {
         // delete if parent is deleted or if this is not the current attribute value of parent
         this.delete(transaction);
       }
@@ -6891,7 +7990,7 @@ class Item extends AbstractStruct {
         parent._length -= this.length;
       }
       this.markDeleted();
-      addToDeleteSet(transaction.deleteSet, this.id, this.length);
+      addToDeleteSet(transaction.deleteSet, this.id.client, this.id.clock, this.length);
       map.setIfUndefined(transaction.changed, parent, set.create).add(this.parentSub);
       this.content.delete(transaction);
     }
@@ -6919,7 +8018,7 @@ class Item extends AbstractStruct {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    * @param {number} offset
    */
   write (encoder, offset) {
@@ -6930,12 +8029,12 @@ class Item extends AbstractStruct {
       (origin === null ? 0 : binary.BIT8) | // origin is defined
       (rightOrigin === null ? 0 : binary.BIT7) | // right origin is defined
       (parentSub === null ? 0 : binary.BIT6); // parentSub is non-null
-    encoding.writeUint8(encoder, info);
+    encoder.writeInfo(info);
     if (origin !== null) {
-      writeID(encoder, origin);
+      encoder.writeLeftID(origin);
     }
     if (rightOrigin !== null) {
-      writeID(encoder, rightOrigin);
+      encoder.writeRightID(rightOrigin);
     }
     if (origin === null && rightOrigin === null) {
       const parent = /** @type {AbstractType<any>} */ (this.parent);
@@ -6944,14 +8043,14 @@ class Item extends AbstractStruct {
         // parent type on y._map
         // find the correct key
         const ykey = findRootTypeKey(parent);
-        encoding.writeVarUint(encoder, 1); // write parentYKey
-        encoding.writeVarString(encoder, ykey);
+        encoder.writeParentInfo(true); // write parentYKey
+        encoder.writeString(ykey);
       } else {
-        encoding.writeVarUint(encoder, 0); // write parent id
-        writeID(encoder, parentItem.id);
+        encoder.writeParentInfo(false); // write parent id
+        encoder.writeLeftID(parentItem.id);
       }
       if (parentSub !== null) {
-        encoding.writeVarString(encoder, parentSub);
+        encoder.writeString(parentSub);
       }
     }
     this.content.write(encoder, offset);
@@ -6959,7 +8058,7 @@ class Item extends AbstractStruct {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @param {number} info
  */
 const readItemContent = (decoder, info) => contentRefs[info & binary.BITS5](decoder);
@@ -6967,7 +8066,7 @@ const readItemContent = (decoder, info) => contentRefs[info & binary.BITS5](deco
 /**
  * A lookup map for reading Item content.
  *
- * @type {Array<function(decoding.Decoder):AbstractContent>}
+ * @type {Array<function(AbstractUpdateDecoder):AbstractContent>}
  */
 const contentRefs = [
   () => { throw error.unexpectedCase() }, // GC is not ItemContent
@@ -6981,41 +8080,7 @@ const contentRefs = [
   readContentAny
 ];
 
-/**
- * @param {decoding.Decoder} decoder
- * @param {ID} id
- * @param {number} info
- * @param {Doc} doc
- */
-const readItem = (decoder, id, info, doc) => {
-  /**
-   * The item that was originally to the left of this item.
-   * @type {ID | null}
-   */
-  const origin = (info & binary.BIT8) === binary.BIT8 ? readID(decoder) : null;
-  /**
-   * The item that was originally to the right of this item.
-   * @type {ID | null}
-   */
-  const rightOrigin = (info & binary.BIT7) === binary.BIT7 ? readID(decoder) : null;
-  const canCopyParentInfo = (info & (binary.BIT7 | binary.BIT8)) === 0;
-  const hasParentYKey = canCopyParentInfo ? decoding.readVarUint(decoder) === 1 : false;
-  /**
-   * If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
-   * and we read the next string as parentYKey.
-   * It indicates how we store/retrieve parent from `y.share`
-   * @type {string|null}
-   */
-  const parentYKey = canCopyParentInfo && hasParentYKey ? decoding.readVarString(decoder) : null;
-
-  return new Item(
-    id, null, origin, null, rightOrigin,
-    canCopyParentInfo && !hasParentYKey ? readID(decoder) : (parentYKey !== null ? doc.get(parentYKey) : null), // parent
-    canCopyParentInfo && (info & binary.BIT6) === binary.BIT6 ? decoding.readVarString(decoder) : null, // parentSub
-    /** @type {AbstractContent} */ (readItemContent(decoder, info)) // item content
-  )
-};
-
+exports.AbstractConnector = AbstractConnector;
 exports.AbstractStruct = AbstractStruct;
 exports.AbstractType = AbstractType;
 exports.Array = YArray;
@@ -7045,8 +8110,10 @@ exports.XmlText = YXmlText;
 exports.YArrayEvent = YArrayEvent;
 exports.YEvent = YEvent;
 exports.YMapEvent = YMapEvent;
+exports.YTextEvent = YTextEvent;
 exports.YXmlEvent = YXmlEvent;
 exports.applyUpdate = applyUpdate;
+exports.applyUpdateV2 = applyUpdateV2;
 exports.compareIDs = compareIDs;
 exports.compareRelativePositions = compareRelativePositions;
 exports.createAbsolutePositionFromRelativePosition = createAbsolutePositionFromRelativePosition;
@@ -7057,10 +8124,16 @@ exports.createRelativePositionFromJSON = createRelativePositionFromJSON;
 exports.createRelativePositionFromTypeIndex = createRelativePositionFromTypeIndex;
 exports.createSnapshot = createSnapshot;
 exports.decodeSnapshot = decodeSnapshot;
+exports.decodeSnapshotV2 = decodeSnapshotV2;
+exports.decodeStateVector = decodeStateVector;
+exports.decodeStateVectorV2 = decodeStateVectorV2;
 exports.emptySnapshot = emptySnapshot;
 exports.encodeSnapshot = encodeSnapshot;
+exports.encodeSnapshotV2 = encodeSnapshotV2;
 exports.encodeStateAsUpdate = encodeStateAsUpdate;
+exports.encodeStateAsUpdateV2 = encodeStateAsUpdateV2;
 exports.encodeStateVector = encodeStateVector;
+exports.encodeStateVectorV2 = encodeStateVectorV2;
 exports.equalSnapshots = equalSnapshots;
 exports.findRootTypeKey = findRootTypeKey;
 exports.getState = getState;
@@ -7068,8 +8141,10 @@ exports.getTypeChildren = getTypeChildren;
 exports.isDeleted = isDeleted;
 exports.isParentOf = isParentOf;
 exports.iterateDeletedStructs = iterateDeletedStructs;
+exports.logType = logType;
 exports.readRelativePosition = readRelativePosition;
 exports.readUpdate = readUpdate;
+exports.readUpdateV2 = readUpdateV2;
 exports.snapshot = snapshot;
 exports.transact = transact;
 exports.tryGc = tryGc;

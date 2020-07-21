@@ -5,86 +5,6 @@ function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'defau
 var iso = _interopDefault(require('isomorphic.js'));
 
 /**
- * Utility module to work with Arrays.
- *
- * @module array
- */
-
-/**
- * Return the last element of an array. The element must exist
- *
- * @template L
- * @param {Array<L>} arr
- * @return {L}
- */
-const last = arr => arr[arr.length - 1];
-
-/**
- * Append elements from src to dest
- *
- * @template M
- * @param {Array<M>} dest
- * @param {Array<M>} src
- */
-const appendTo = (dest, src) => {
-  for (let i = 0; i < src.length; i++) {
-    dest.push(src[i]);
-  }
-};
-
-/**
- * Transforms something array-like to an actual Array.
- *
- * @function
- * @template T
- * @param {ArrayLike<T>|Iterable<T>} arraylike
- * @return {T}
- */
-const from = Array.from;
-
-/**
- * Common Math expressions.
- *
- * @module math
- */
-
-const floor = Math.floor;
-const ceil = Math.ceil;
-const round = Math.round;
-const log10 = Math.log10;
-
-/**
- * @function
- * @param {number} a
- * @param {number} b
- * @return {number} The sum of a and b
- */
-const add = (a, b) => a + b;
-
-/**
- * @function
- * @param {number} a
- * @param {number} b
- * @return {number} The smaller element of a and b
- */
-const min = (a, b) => a < b ? a : b;
-
-/**
- * @function
- * @param {number} a
- * @param {number} b
- * @return {number} The bigger element of a and b
- */
-const max = (a, b) => a > b ? a : b;
-/**
- * Base 10 exponential function. Returns the value of 10 raised to the power of pow.
- *
- * @param {number} exp
- * @return {number}
- */
-const exp10 = exp => Math.pow(10, exp);
-
-/**
  * Utility module to work with key-value stores.
  *
  * @module map
@@ -209,71 +129,22 @@ const fromCamelCaseRegex = /([A-Z])/g;
  */
 const fromCamelCase = (s, separator) => trimLeft(s.replace(fromCamelCaseRegex, match => `${separator}${toLowerCase(match)}`));
 
-/**
- * @param {string} str
- * @return {Uint8Array}
- */
-const _encodeUtf8Polyfill = str => {
-  const encodedString = unescape(encodeURIComponent(str));
-  const len = encodedString.length;
-  const buf = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    buf[i] = /** @type {number} */ (encodedString.codePointAt(i));
-  }
-  return buf
-};
-
 /* istanbul ignore next */
 const utf8TextEncoder = /** @type {TextEncoder} */ (typeof TextEncoder !== 'undefined' ? new TextEncoder() : null);
 
-/**
- * @param {string} str
- * @return {Uint8Array}
- */
-const _encodeUtf8Native = str => utf8TextEncoder.encode(str);
-
-/**
- * @param {string} str
- * @return {Uint8Array}
- */
 /* istanbul ignore next */
-const encodeUtf8 = utf8TextEncoder ? _encodeUtf8Native : _encodeUtf8Polyfill;
-
-/**
- * @param {Uint8Array} buf
- * @return {string}
- */
-const _decodeUtf8Polyfill = buf => {
-  let remainingLen = buf.length;
-  let encodedString = '';
-  let bufPos = 0;
-  while (remainingLen > 0) {
-    const nextLen = remainingLen < 10000 ? remainingLen : 10000;
-    const bytes = new Array(nextLen);
-    for (let i = 0; i < nextLen; i++) {
-      bytes[i] = buf[bufPos++];
-    }
-    encodedString += String.fromCodePoint.apply(null, bytes);
-    remainingLen -= nextLen;
-  }
-  return decodeURIComponent(escape(encodedString))
-};
+let utf8TextDecoder = typeof TextDecoder === 'undefined' ? null : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /* istanbul ignore next */
-const utf8TextDecoder = typeof TextDecoder === 'undefined' ? null : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-
-/**
- * @param {Uint8Array} buf
- * @return {string}
- */
-const _decodeUtf8Native = buf => /** @type {TextDecoder} */ (utf8TextDecoder).decode(buf);
-
-/**
- * @param {Uint8Array} buf
- * @return {string}
- */
-/* istanbul ignore next */
-const decodeUtf8 = utf8TextDecoder ? _decodeUtf8Native : _decodeUtf8Polyfill;
+if (utf8TextDecoder && utf8TextDecoder.decode(new Uint8Array()).length === 1) {
+  // Safari doesn't handle BOM correctly.
+  // This fixes a bug in Safari 13.0.5 where it produces a BOM the first time it is called.
+  // utf8TextDecoder.decode(new Uint8Array()).length === 1 on the first call and
+  // utf8TextDecoder.decode(new Uint8Array()).length === 1 on the second call
+  // Another issue is that from then on no BOM chars are recognized anymore
+  /* istanbul ignore next */
+  utf8TextDecoder = null;
+}
 
 /**
  * Often used conditions.
@@ -434,59 +305,891 @@ const hasConf = name => hasParam('--' + name) || getVariable(name) !== null;
 const production = hasConf('production');
 
 /**
- * Utility functions to work with buffers (Uint8Array).
+ * Utility module to work with EcmaScript Symbols.
  *
- * @module buffer
+ * @module symbol
  */
 
 /**
- * @param {number} len
- */
-const createUint8ArrayFromLen = len => new Uint8Array(len);
-
-/**
- * Create Uint8Array with initial content from buffer
+ * Return fresh symbol.
  *
- * @param {ArrayBuffer} buffer
- * @param {number} byteOffset
- * @param {number} length
+ * @return {Symbol}
  */
-const createUint8ArrayViewFromArrayBuffer = (buffer, byteOffset, length) => new Uint8Array(buffer, byteOffset, length);
+const create$1 = Symbol;
 
-/* istanbul ignore next */
 /**
- * @param {string} s
- * @return {Uint8Array}
+ * Working with value pairs.
+ *
+ * @module pair
  */
-const fromBase64Browser = s => {
-  // eslint-disable-next-line no-undef
-  const a = atob(s);
-  const bytes = createUint8ArrayFromLen(a.length);
-  for (let i = 0; i < a.length; i++) {
-    bytes[i] = a.charCodeAt(i);
+
+/**
+ * @template L,R
+ */
+class Pair {
+  /**
+   * @param {L} left
+   * @param {R} right
+   */
+  constructor (left, right) {
+    this.left = left;
+    this.right = right;
   }
-  return bytes
-};
+}
 
 /**
- * @param {string} s
+ * @template L,R
+ * @param {L} left
+ * @param {R} right
+ * @return {Pair<L,R>}
  */
-const fromBase64Node = s => new Uint8Array(Buffer.from(s, 'base64').buffer);
+const create$2 = (left, right) => new Pair(left, right);
+
+/**
+ * @template L,R
+ * @param {Array<Pair<L,R>>} arr
+ * @param {function(L, R):any} f
+ */
+const forEach = (arr, f) => arr.forEach(p => f(p.left, p.right));
+
+/* eslint-env browser */
 
 /* istanbul ignore next */
-const fromBase64 = isBrowser ? fromBase64Browser : fromBase64Node;
+/**
+ * @type {Document}
+ */
+const doc = /** @type {Document} */ (typeof document !== 'undefined' ? document : {});
 
 /**
- * Copy the content of an Uint8Array view to a new ArrayBuffer.
- *
- * @param {Uint8Array} uint8Array
- * @return {Uint8Array}
+ * @param {string} name
+ * @return {HTMLElement}
  */
-const copyUint8Array = uint8Array => {
-  const newBuf = createUint8ArrayFromLen(uint8Array.byteLength);
-  newBuf.set(uint8Array);
-  return newBuf
+/* istanbul ignore next */
+const createElement = name => doc.createElement(name);
+
+/**
+ * @return {DocumentFragment}
+ */
+/* istanbul ignore next */
+const createDocumentFragment = () => doc.createDocumentFragment();
+
+/**
+ * @param {string} text
+ * @return {Text}
+ */
+/* istanbul ignore next */
+const createTextNode = text => doc.createTextNode(text);
+
+/* istanbul ignore next */
+const domParser = /** @type {DOMParser} */ (typeof DOMParser !== 'undefined' ? new DOMParser() : null);
+
+/**
+ * @param {Element} el
+ * @param {Array<pair.Pair<string,string|boolean>>} attrs Array of key-value pairs
+ * @return {Element}
+ */
+/* istanbul ignore next */
+const setAttributes = (el, attrs) => {
+  forEach(attrs, (key, value) => {
+    if (value === false) {
+      el.removeAttribute(key);
+    } else if (value === true) {
+      el.setAttribute(key, '');
+    } else {
+      // @ts-ignore
+      el.setAttribute(key, value);
+    }
+  });
+  return el
 };
+
+/**
+ * @param {Array<Node>|HTMLCollection} children
+ * @return {DocumentFragment}
+ */
+/* istanbul ignore next */
+const fragment = children => {
+  const fragment = createDocumentFragment();
+  for (let i = 0; i < children.length; i++) {
+    appendChild(fragment, children[i]);
+  }
+  return fragment
+};
+
+/**
+ * @param {Element} parent
+ * @param {Array<Node>} nodes
+ * @return {Element}
+ */
+/* istanbul ignore next */
+const append = (parent, nodes) => {
+  appendChild(parent, fragment(nodes));
+  return parent
+};
+
+/**
+ * @param {EventTarget} el
+ * @param {string} name
+ * @param {EventListener} f
+ */
+/* istanbul ignore next */
+const addEventListener = (el, name, f) => el.addEventListener(name, f);
+
+/**
+ * @param {string} name
+ * @param {Array<pair.Pair<string,string>|pair.Pair<string,boolean>>} attrs Array of key-value pairs
+ * @param {Array<Node>} children
+ * @return {Element}
+ */
+/* istanbul ignore next */
+const element = (name, attrs = [], children = []) =>
+  append(setAttributes(createElement(name), attrs), children);
+
+/**
+ * @param {string} t
+ * @return {Text}
+ */
+/* istanbul ignore next */
+const text = createTextNode;
+
+/**
+ * @param {Map<string,string>} m
+ * @return {string}
+ */
+/* istanbul ignore next */
+const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
+
+/**
+ * @param {Node} parent
+ * @param {Node} child
+ * @return {Node}
+ */
+/* istanbul ignore next */
+const appendChild = (parent, child) => parent.appendChild(child);
+
+/**
+ * JSON utility functions.
+ *
+ * @module json
+ */
+
+/**
+ * Transform JavaScript object to JSON.
+ *
+ * @param {any} object
+ * @return {string}
+ */
+const stringify = JSON.stringify;
+
+/* global requestIdleCallback, requestAnimationFrame, cancelIdleCallback, cancelAnimationFrame */
+
+/**
+ * Utility module to work with EcmaScript's event loop.
+ *
+ * @module eventloop
+ */
+
+/**
+ * @type {Array<function>}
+ */
+let queue = [];
+
+const _runQueue = () => {
+  for (let i = 0; i < queue.length; i++) {
+    queue[i]();
+  }
+  queue = [];
+};
+
+/**
+ * @param {function():void} f
+ */
+const enqueue = f => {
+  queue.push(f);
+  if (queue.length === 1) {
+    setTimeout(_runQueue, 0);
+  }
+};
+
+/**
+ * Common Math expressions.
+ *
+ * @module math
+ */
+
+const floor = Math.floor;
+const ceil = Math.ceil;
+const abs = Math.abs;
+const round = Math.round;
+const log10 = Math.log10;
+
+/**
+ * @function
+ * @param {number} a
+ * @param {number} b
+ * @return {number} The sum of a and b
+ */
+const add = (a, b) => a + b;
+
+/**
+ * @function
+ * @param {number} a
+ * @param {number} b
+ * @return {number} The smaller element of a and b
+ */
+const min = (a, b) => a < b ? a : b;
+
+/**
+ * @function
+ * @param {number} a
+ * @param {number} b
+ * @return {number} The bigger element of a and b
+ */
+const max = (a, b) => a > b ? a : b;
+/**
+ * Base 10 exponential function. Returns the value of 10 raised to the power of pow.
+ *
+ * @param {number} exp
+ * @return {number}
+ */
+const exp10 = exp => Math.pow(10, exp);
+
+/**
+ * @param {number} n
+ * @return {boolean} Wether n is negative. This function also differentiates between -0 and +0
+ */
+const isNegativeZero = n => n !== 0 ? n < 0 : 1 / n < 0;
+
+/**
+ * Utility module to convert metric values.
+ *
+ * @module metric
+ */
+
+const prefixUp = ['', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
+const prefixDown = ['', 'm', 'μ', 'n', 'p', 'f', 'a', 'z', 'y'];
+
+/**
+ * Calculate the metric prefix for a number. Assumes E.g. `prefix(1000) = { n: 1, prefix: 'k' }`
+ *
+ * @param {number} n
+ * @param {number} [baseMultiplier] Multiplier of the base (10^(3*baseMultiplier)). E.g. `convert(time, -3)` if time is already in milli seconds
+ * @return {{n:number,prefix:string}}
+ */
+const prefix = (n, baseMultiplier = 0) => {
+  const nPow = n === 0 ? 0 : log10(n);
+  let mult = 0;
+  while (nPow < mult * 3 && baseMultiplier > -8) {
+    baseMultiplier--;
+    mult--;
+  }
+  while (nPow >= 3 + mult * 3 && baseMultiplier < 8) {
+    baseMultiplier++;
+    mult++;
+  }
+  const prefix = baseMultiplier < 0 ? prefixDown[-baseMultiplier] : prefixUp[baseMultiplier];
+  return {
+    n: round((mult > 0 ? n / exp10(mult * 3) : n * exp10(mult * -3)) * 1e12) / 1e12,
+    prefix
+  }
+};
+
+/**
+ * Utility module to work with time.
+ *
+ * @module time
+ */
+
+/**
+ * Return current unix time.
+ *
+ * @return {number}
+ */
+const getUnixTime = Date.now;
+
+/**
+ * Transform time (in ms) to a human readable format. E.g. 1100 => 1.1s. 60s => 1min. .001 => 10μs.
+ *
+ * @param {number} d duration in milliseconds
+ * @return {string} humanized approximation of time
+ */
+const humanizeDuration = d => {
+  if (d < 60000) {
+    const p = prefix(d, -1);
+    return round(p.n * 100) / 100 + p.prefix + 's'
+  }
+  d = floor(d / 1000);
+  const seconds = d % 60;
+  const minutes = floor(d / 60) % 60;
+  const hours = floor(d / 3600) % 24;
+  const days = floor(d / 86400);
+  if (days > 0) {
+    return days + 'd' + ((hours > 0 || minutes > 30) ? ' ' + (minutes > 30 ? hours + 1 : hours) + 'h' : '')
+  }
+  if (hours > 0) {
+    /* istanbul ignore next */
+    return hours + 'h' + ((minutes > 0 || seconds > 30) ? ' ' + (seconds > 30 ? minutes + 1 : minutes) + 'min' : '')
+  }
+  return minutes + 'min' + (seconds > 0 ? ' ' + seconds + 's' : '')
+};
+
+/**
+ * Utility module to work with Arrays.
+ *
+ * @module array
+ */
+
+/**
+ * Return the last element of an array. The element must exist
+ *
+ * @template L
+ * @param {Array<L>} arr
+ * @return {L}
+ */
+const last = arr => arr[arr.length - 1];
+
+/**
+ * Append elements from src to dest
+ *
+ * @template M
+ * @param {Array<M>} dest
+ * @param {Array<M>} src
+ */
+const appendTo = (dest, src) => {
+  for (let i = 0; i < src.length; i++) {
+    dest.push(src[i]);
+  }
+};
+
+/**
+ * Transforms something array-like to an actual Array.
+ *
+ * @function
+ * @template T
+ * @param {ArrayLike<T>|Iterable<T>} arraylike
+ * @return {T}
+ */
+const from = Array.from;
+
+/**
+ * Utility functions for working with EcmaScript objects.
+ *
+ * @module object
+ */
+
+/**
+ * @param {Object<string,any>} obj
+ */
+const keys = Object.keys;
+
+/**
+ * @param {Object<string,any>} obj
+ * @param {function(any,string):any} f
+ */
+const forEach$1 = (obj, f) => {
+  for (const key in obj) {
+    f(obj[key], key);
+  }
+};
+
+/**
+ * @template R
+ * @param {Object<string,any>} obj
+ * @param {function(any,string):R} f
+ * @return {Array<R>}
+ */
+const map$1 = (obj, f) => {
+  const results = [];
+  for (const key in obj) {
+    results.push(f(obj[key], key));
+  }
+  return results
+};
+
+/**
+ * @param {Object<string,any>} obj
+ * @return {number}
+ */
+const length = obj => keys(obj).length;
+
+/**
+ * @param {Object<string,any>} obj
+ * @param {function(any,string):boolean} f
+ * @return {boolean}
+ */
+const every = (obj, f) => {
+  for (const key in obj) {
+    if (!f(obj[key], key)) {
+      return false
+    }
+  }
+  return true
+};
+
+/**
+ * Calls `Object.prototype.hasOwnProperty`.
+ *
+ * @param {any} obj
+ * @param {string|symbol} key
+ * @return {boolean}
+ */
+const hasProperty = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+/**
+ * @param {Object<string,any>} a
+ * @param {Object<string,any>} b
+ * @return {boolean}
+ */
+const equalFlat = (a, b) => a === b || (length(a) === length(b) && every(a, (val, key) => (val !== undefined || hasProperty(b, key)) && b[key] === val));
+
+/**
+ * Common functions and function call helpers.
+ *
+ * @module function
+ */
+
+/**
+ * Calls all functions in `fs` with args. Only throws after all functions were called.
+ *
+ * @param {Array<function>} fs
+ * @param {Array<any>} args
+ */
+const callAll = (fs, args, i = 0) => {
+  try {
+    for (; i < fs.length; i++) {
+      fs[i](...args);
+    }
+  } finally {
+    if (i < fs.length) {
+      callAll(fs, args, i + 1);
+    }
+  }
+};
+
+/**
+ * Isomorphic logging module with support for colors!
+ *
+ * @module logging
+ */
+
+const BOLD = create$1();
+const UNBOLD = create$1();
+const BLUE = create$1();
+const GREY = create$1();
+const GREEN = create$1();
+const RED = create$1();
+const PURPLE = create$1();
+const ORANGE = create$1();
+const UNCOLOR = create$1();
+
+/**
+ * @type {Object<Symbol,pair.Pair<string,string>>}
+ */
+const _browserStyleMap = {
+  [BOLD]: create$2('font-weight', 'bold'),
+  [UNBOLD]: create$2('font-weight', 'normal'),
+  [BLUE]: create$2('color', 'blue'),
+  [GREEN]: create$2('color', 'green'),
+  [GREY]: create$2('color', 'grey'),
+  [RED]: create$2('color', 'red'),
+  [PURPLE]: create$2('color', 'purple'),
+  [ORANGE]: create$2('color', 'orange'), // not well supported in chrome when debugging node with inspector - TODO: deprecate
+  [UNCOLOR]: create$2('color', 'black')
+};
+
+const _nodeStyleMap = {
+  [BOLD]: '\u001b[1m',
+  [UNBOLD]: '\u001b[2m',
+  [BLUE]: '\x1b[34m',
+  [GREEN]: '\x1b[32m',
+  [GREY]: '\u001b[37m',
+  [RED]: '\x1b[31m',
+  [PURPLE]: '\x1b[35m',
+  [ORANGE]: '\x1b[38;5;208m',
+  [UNCOLOR]: '\x1b[0m'
+};
+
+/* istanbul ignore next */
+/**
+ * @param {Array<string|Symbol|Object|number>} args
+ * @return {Array<string|object|number>}
+ */
+const computeBrowserLoggingArgs = args => {
+  const strBuilder = [];
+  const styles = [];
+  const currentStyle = create();
+  /**
+   * @type {Array<string|Object|number>}
+   */
+  let logArgs = [];
+  // try with formatting until we find something unsupported
+  let i = 0;
+
+  for (; i < args.length; i++) {
+    const arg = args[i];
+    // @ts-ignore
+    const style = _browserStyleMap[arg];
+    if (style !== undefined) {
+      currentStyle.set(style.left, style.right);
+    } else {
+      if (arg.constructor === String || arg.constructor === Number) {
+        const style = mapToStyleString(currentStyle);
+        if (i > 0 || style.length > 0) {
+          strBuilder.push('%c' + arg);
+          styles.push(style);
+        } else {
+          strBuilder.push(arg);
+        }
+      } else {
+        break
+      }
+    }
+  }
+
+  if (i > 0) {
+    // create logArgs with what we have so far
+    logArgs = styles;
+    logArgs.unshift(strBuilder.join(''));
+  }
+  // append the rest
+  for (; i < args.length; i++) {
+    const arg = args[i];
+    if (!(arg instanceof Symbol)) {
+      logArgs.push(arg);
+    }
+  }
+  return logArgs
+};
+
+/**
+ * @param {Array<string|Symbol|Object|number>} args
+ * @return {Array<string|object|number>}
+ */
+const computeNodeLoggingArgs = args => {
+  const strBuilder = [];
+  const logArgs = [];
+
+  // try with formatting until we find something unsupported
+  let i = 0;
+
+  for (; i < args.length; i++) {
+    const arg = args[i];
+    // @ts-ignore
+    const style = _nodeStyleMap[arg];
+    if (style !== undefined) {
+      strBuilder.push(style);
+    } else {
+      if (arg.constructor === String || arg.constructor === Number) {
+        strBuilder.push(arg);
+      } else {
+        break
+      }
+    }
+  }
+  if (i > 0) {
+    // create logArgs with what we have so far
+    strBuilder.push('\x1b[0m');
+    logArgs.push(strBuilder.join(''));
+  }
+  // append the rest
+  for (; i < args.length; i++) {
+    const arg = args[i];
+    /* istanbul ignore else */
+    if (!(arg instanceof Symbol)) {
+      logArgs.push(arg);
+    }
+  }
+  return logArgs
+};
+
+/* istanbul ignore next */
+const computeLoggingArgs = isNode ? computeNodeLoggingArgs : computeBrowserLoggingArgs;
+
+/**
+ * @param {Array<string|Symbol|Object|number>} args
+ */
+const print = (...args) => {
+  console.log(...computeLoggingArgs(args));
+  /* istanbul ignore next */
+  vconsoles.forEach(vc => vc.print(args));
+};
+
+/* istanbul ignore next */
+/**
+ * @param {Error} err
+ */
+const printError = err => {
+  console.error(err);
+  vconsoles.forEach(vc => vc.printError(err));
+};
+
+/* istanbul ignore next */
+/**
+ * @param {string} url image location
+ * @param {number} height height of the image in pixel
+ */
+const printImg = (url, height) => {
+  if (isBrowser) {
+    console.log('%c                      ', `font-size: ${height}px; background-size: contain; background-repeat: no-repeat; background-image: url(${url})`);
+    // console.log('%c                ', `font-size: ${height}x; background: url(${url}) no-repeat;`)
+  }
+  vconsoles.forEach(vc => vc.printImg(url, height));
+};
+
+/* istanbul ignore next */
+/**
+ * @param {string} base64
+ * @param {number} height
+ */
+const printImgBase64 = (base64, height) => printImg(`data:image/gif;base64,${base64}`, height);
+
+/**
+ * @param {Array<string|Symbol|Object|number>} args
+ */
+const group = (...args) => {
+  console.group(...computeLoggingArgs(args));
+  /* istanbul ignore next */
+  vconsoles.forEach(vc => vc.group(args));
+};
+
+/**
+ * @param {Array<string|Symbol|Object|number>} args
+ */
+const groupCollapsed = (...args) => {
+  console.groupCollapsed(...computeLoggingArgs(args));
+  /* istanbul ignore next */
+  vconsoles.forEach(vc => vc.groupCollapsed(args));
+};
+
+const groupEnd = () => {
+  console.groupEnd();
+  /* istanbul ignore next */
+  vconsoles.forEach(vc => vc.groupEnd());
+};
+
+const vconsoles = new Set();
+
+/* istanbul ignore next */
+/**
+ * @param {Array<string|Symbol|Object|number>} args
+ * @return {Array<Element>}
+ */
+const _computeLineSpans = args => {
+  const spans = [];
+  const currentStyle = new Map();
+  // try with formatting until we find something unsupported
+  let i = 0;
+  for (; i < args.length; i++) {
+    const arg = args[i];
+    // @ts-ignore
+    const style = _browserStyleMap[arg];
+    if (style !== undefined) {
+      currentStyle.set(style.left, style.right);
+    } else {
+      if (arg.constructor === String || arg.constructor === Number) {
+        // @ts-ignore
+        const span = element('span', [create$2('style', mapToStyleString(currentStyle))], [text(arg)]);
+        if (span.innerHTML === '') {
+          span.innerHTML = '&nbsp;';
+        }
+        spans.push(span);
+      } else {
+        break
+      }
+    }
+  }
+  // append the rest
+  for (; i < args.length; i++) {
+    let content = args[i];
+    if (!(content instanceof Symbol)) {
+      if (content.constructor !== String && content.constructor !== Number) {
+        content = ' ' + stringify(content) + ' ';
+      }
+      spans.push(element('span', [], [text(/** @type {string} */ (content))]));
+    }
+  }
+  return spans
+};
+
+const lineStyle = 'font-family:monospace;border-bottom:1px solid #e2e2e2;padding:2px;';
+
+/* istanbul ignore next */
+class VConsole {
+  /**
+   * @param {Element} dom
+   */
+  constructor (dom) {
+    this.dom = dom;
+    /**
+     * @type {Element}
+     */
+    this.ccontainer = this.dom;
+    this.depth = 0;
+    vconsoles.add(this);
+  }
+
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   * @param {boolean} collapsed
+   */
+  group (args, collapsed = false) {
+    enqueue(() => {
+      const triangleDown = element('span', [create$2('hidden', collapsed), create$2('style', 'color:grey;font-size:120%;')], [text('▼')]);
+      const triangleRight = element('span', [create$2('hidden', !collapsed), create$2('style', 'color:grey;font-size:125%;')], [text('▶')]);
+      const content = element('div', [create$2('style', `${lineStyle};padding-left:${this.depth * 10}px`)], [triangleDown, triangleRight, text(' ')].concat(_computeLineSpans(args)));
+      const nextContainer = element('div', [create$2('hidden', collapsed)]);
+      const nextLine = element('div', [], [content, nextContainer]);
+      append(this.ccontainer, [nextLine]);
+      this.ccontainer = nextContainer;
+      this.depth++;
+      // when header is clicked, collapse/uncollapse container
+      addEventListener(content, 'click', event => {
+        nextContainer.toggleAttribute('hidden');
+        triangleDown.toggleAttribute('hidden');
+        triangleRight.toggleAttribute('hidden');
+      });
+    });
+  }
+
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   */
+  groupCollapsed (args) {
+    this.group(args, true);
+  }
+
+  groupEnd () {
+    enqueue(() => {
+      if (this.depth > 0) {
+        this.depth--;
+        // @ts-ignore
+        this.ccontainer = this.ccontainer.parentElement.parentElement;
+      }
+    });
+  }
+
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   */
+  print (args) {
+    enqueue(() => {
+      append(this.ccontainer, [element('div', [create$2('style', `${lineStyle};padding-left:${this.depth * 10}px`)], _computeLineSpans(args))]);
+    });
+  }
+
+  /**
+   * @param {Error} err
+   */
+  printError (err) {
+    this.print([RED, BOLD, err.toString()]);
+  }
+
+  /**
+   * @param {string} url
+   * @param {number} height
+   */
+  printImg (url, height) {
+    enqueue(() => {
+      append(this.ccontainer, [element('img', [create$2('src', url), create$2('height', `${round(height * 1.5)}px`)])]);
+    });
+  }
+
+  /**
+   * @param {Node} node
+   */
+  printDom (node) {
+    enqueue(() => {
+      append(this.ccontainer, [node]);
+    });
+  }
+
+  destroy () {
+    enqueue(() => {
+      vconsoles.delete(this);
+    });
+  }
+}
+
+/* istanbul ignore next */
+/**
+ * @param {Element} dom
+ */
+const createVConsole = dom => new VConsole(dom);
+
+/**
+ * Efficient diffs.
+ *
+ * @module diff
+ */
+
+/**
+ * A SimpleDiff describes a change on a String.
+ *
+ * ```js
+ * console.log(a) // the old value
+ * console.log(b) // the updated value
+ * // Apply changes of diff (pseudocode)
+ * a.remove(diff.index, diff.remove) // Remove `diff.remove` characters
+ * a.insert(diff.index, diff.insert) // Insert `diff.insert`
+ * a === b // values match
+ * ```
+ *
+ * @typedef {Object} SimpleDiff
+ * @property {Number} index The index where changes were applied
+ * @property {Number} remove The number of characters to delete starting
+ *                                  at `index`.
+ * @property {T} insert The new text to insert at `index` after applying
+ *                           `delete`
+ *
+ * @template T
+ */
+
+/**
+ * Create a diff between two strings. This diff implementation is highly
+ * efficient, but not very sophisticated.
+ *
+ * @function
+ *
+ * @param {string} a The old version of the string
+ * @param {string} b The updated version of the string
+ * @return {SimpleDiff<string>} The diff description.
+ */
+const simpleDiffString = (a, b) => {
+  let left = 0; // number of same characters counting from left
+  let right = 0; // number of same characters counting from right
+  while (left < a.length && left < b.length && a[left] === b[left]) {
+    left++;
+  }
+  if (left !== a.length || left !== b.length) {
+    // Only check right if a !== b
+    while (right + left < a.length && right + left < b.length && a[a.length - right - 1] === b[b.length - right - 1]) {
+      right++;
+    }
+  }
+  return {
+    index: left,
+    remove: a.length - left - right,
+    insert: b.slice(left, b.length - right)
+  }
+};
+
+/**
+ * @todo Remove in favor of simpleDiffString
+ * @deprecated
+ */
+const simpleDiff = simpleDiffString;
+
+/**
+ * Isomorphic library exports from isomorphic.js.
+ *
+ * @module isomorphic
+ */
+
+const performance = /** @type {any} */ (iso.performance);
+const cryptoRandomBuffer = /** @type {any} */ (iso.cryptoRandomBuffer);
+
+/* istanbul ignore next */
+const uint32 = () => new Uint32Array(cryptoRandomBuffer(4))[0];
 
 /* eslint-env browser */
 
@@ -504,6 +1207,7 @@ const copyUint8Array = uint8Array => {
 const BIT1 = 1;
 const BIT2 = 2;
 const BIT3 = 4;
+const BIT4 = 8;
 const BIT6 = 32;
 const BIT7 = 64;
 const BIT8 = 128;
@@ -512,6 +1216,149 @@ const BITS6 = 63;
 const BITS7 = 127;
 const BITS31 = 0x7FFFFFFF;
 const BITS32 = 0xFFFFFFFF;
+
+/**
+ * @module prng
+ */
+
+/**
+ * Xorshift32 is a very simple but elegang PRNG with a period of `2^32-1`.
+ */
+class Xorshift32 {
+  /**
+   * @param {number} seed Unsigned 32 bit number
+   */
+  constructor (seed) {
+    this.seed = seed;
+    /**
+     * @type {number}
+     */
+    this._state = seed;
+  }
+
+  /**
+   * Generate a random signed integer.
+   *
+   * @return {Number} A 32 bit signed integer.
+   */
+  next () {
+    let x = this._state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    this._state = x;
+    return (x >>> 0) / (BITS32 + 1)
+  }
+}
+
+/**
+ * @module prng
+ */
+
+/**
+ * This is a variant of xoroshiro128plus - the fastest full-period generator passing BigCrush without systematic failures.
+ *
+ * This implementation follows the idea of the original xoroshiro128plus implementation,
+ * but is optimized for the JavaScript runtime. I.e.
+ * * The operations are performed on 32bit integers (the original implementation works with 64bit values).
+ * * The initial 128bit state is computed based on a 32bit seed and Xorshift32.
+ * * This implementation returns two 32bit values based on the 64bit value that is computed by xoroshiro128plus.
+ *   Caution: The last addition step works slightly different than in the original implementation - the add carry of the
+ *   first 32bit addition is not carried over to the last 32bit.
+ *
+ * [Reference implementation](http://vigna.di.unimi.it/xorshift/xoroshiro128plus.c)
+ */
+class Xoroshiro128plus {
+  /**
+   * @param {number} seed Unsigned 32 bit number
+   */
+  constructor (seed) {
+    this.seed = seed;
+    // This is a variant of Xoroshiro128plus to fill the initial state
+    const xorshift32 = new Xorshift32(seed);
+    this.state = new Uint32Array(4);
+    for (let i = 0; i < 4; i++) {
+      this.state[i] = xorshift32.next() * BITS32;
+    }
+    this._fresh = true;
+  }
+
+  /**
+   * @return {number} Float/Double in [0,1)
+   */
+  next () {
+    const state = this.state;
+    if (this._fresh) {
+      this._fresh = false;
+      return ((state[0] + state[2]) >>> 0) / BITS32
+    } else {
+      this._fresh = true;
+      const s0 = state[0];
+      const s1 = state[1];
+      const s2 = state[2] ^ s0;
+      const s3 = state[3] ^ s1;
+      // function js_rotl (x, k) {
+      //   k = k - 32
+      //   const x1 = x[0]
+      //   const x2 = x[1]
+      //   x[0] = x2 << k | x1 >>> (32 - k)
+      //   x[1] = x1 << k | x2 >>> (32 - k)
+      // }
+      // rotl(s0, 55) // k = 23 = 55 - 32; j = 9 =  32 - 23
+      state[0] = (s1 << 23 | s0 >>> 9) ^ s2 ^ (s2 << 14 | s3 >>> 18);
+      state[1] = (s0 << 23 | s1 >>> 9) ^ s3 ^ (s3 << 14);
+      // rol(s1, 36) // k = 4 = 36 - 32; j = 23 = 32 - 9
+      state[2] = s3 << 4 | s2 >>> 28;
+      state[3] = s2 << 4 | s3 >>> 28;
+      return (((state[1] + state[3]) >>> 0) / (BITS32 + 1))
+    }
+  }
+}
+
+/*
+// Reference implementation
+// Source: http://vigna.di.unimi.it/xorshift/xoroshiro128plus.c
+// By David Blackman and Sebastiano Vigna
+// Who published the reference implementation under Public Domain (CC0)
+
+#include <stdint.h>
+#include <stdio.h>
+
+uint64_t s[2];
+
+static inline uint64_t rotl(const uint64_t x, int k) {
+    return (x << k) | (x >> (64 - k));
+}
+
+uint64_t next(void) {
+    const uint64_t s0 = s[0];
+    uint64_t s1 = s[1];
+    s1 ^= s0;
+    s[0] = rotl(s0, 55) ^ s1 ^ (s1 << 14); // a, b
+    s[1] = rotl(s1, 36); // c
+    return (s[0] + s[1]) & 0xFFFFFFFF;
+}
+
+int main(void)
+{
+    int i;
+    s[0] = 1111 | (1337ul << 32);
+    s[1] = 1234 | (9999ul << 32);
+
+    printf("1000 outputs of genrand_int31()\n");
+    for (i=0; i<100; i++) {
+        printf("%10lu ", i);
+        printf("%10lu ", next());
+        printf("- %10lu ", s[0] >> 32);
+        printf("%10lu ", (s[0] << 32) >> 32);
+        printf("%10lu ", s[1] >> 32);
+        printf("%10lu ", (s[1] << 32) >> 32);
+        printf("\n");
+        // if (i%5==4) printf("\n");
+    }
+    return 0;
+}
+*/
 
 /**
  * Utility helpers for working with numbers.
@@ -581,7 +1428,7 @@ const createEncoder = () => new Encoder();
  * @param {Encoder} encoder
  * @return {number}
  */
-const length = encoder => {
+const length$1 = encoder => {
   let len = encoder.cpos;
   for (let i = 0; i < encoder.bufs.length; i++) {
     len += encoder.bufs[i].length;
@@ -597,7 +1444,7 @@ const length = encoder => {
  * @return {Uint8Array} The created ArrayBuffer.
  */
 const toUint8Array = encoder => {
-  const uint8arr = new Uint8Array(length(encoder));
+  const uint8arr = new Uint8Array(length$1(encoder));
   let curPos = 0;
   for (let i = 0; i < encoder.bufs.length; i++) {
     const d = encoder.bufs[i];
@@ -672,15 +1519,19 @@ const writeVarUint = (encoder, num) => {
  *
  * Encodes integers in the range from [-2147483648, -2147483647].
  *
+ * We don't use zig-zag encoding because we want to keep the option open
+ * to use the same function for BigInt and 53bit integers (doubles).
+ *
+ * We use the 7th bit instead for signaling that this is a negative number.
+ *
  * @function
  * @param {Encoder} encoder
  * @param {number} num The number that is to be encoded.
  */
 const writeVarInt = (encoder, num) => {
-  let isNegative = false;
-  if (num < 0) {
+  const isNegative = isNegativeZero(num);
+  if (isNegative) {
     num = -num;
-    isNegative = true;
   }
   //             |- whether to continue reading         |- whether is negative     |- number
   write(encoder, (num > BITS6 ? BIT8 : 0) | (isNegative ? BIT7 : 0) | (BITS6 & num));
@@ -700,8 +1551,14 @@ const writeVarInt = (encoder, num) => {
  * @param {Encoder} encoder
  * @param {String} str The string that is to be encoded.
  */
-const writeVarString = (encoder, str) =>
-  writeVarUint8Array(encoder, encodeUtf8(str));
+const writeVarString = (encoder, str) => {
+  const encodedString = unescape(encodeURIComponent(str));
+  const len = encodedString.length;
+  writeVarUint(encoder, len);
+  for (let i = 0; i < len; i++) {
+    write(encoder, /** @type {number} */ (encodedString.codePointAt(i)));
+  }
+};
 
 /**
  * Append fixed-length Uint8Array to the encoder.
@@ -897,6 +1754,218 @@ const writeAny = (encoder, data) => {
 };
 
 /**
+ * Now come a few stateful encoder that have their own classes.
+ */
+
+/**
+ * Basic Run Length Encoder - a basic compression implementation.
+ *
+ * Encodes [1,1,1,7] to [1,3,7,1] (3 times 1, 1 time 7). This encoder might do more harm than good if there are a lot of values that are not repeated.
+ *
+ * It was originally used for image compression. Cool .. article http://csbruce.com/cbm/transactor/pdfs/trans_v7_i06.pdf
+ *
+ * @note T must not be null!
+ *
+ * @template T
+ */
+class RleEncoder extends Encoder {
+  /**
+   * @param {function(Encoder, T):void} writer
+   */
+  constructor (writer) {
+    super();
+    /**
+     * The writer
+     */
+    this.w = writer;
+    /**
+     * Current state
+     * @type {T|null}
+     */
+    this.s = null;
+    this.count = 0;
+  }
+
+  /**
+   * @param {T} v
+   */
+  write (v) {
+    if (this.s === v) {
+      this.count++;
+    } else {
+      if (this.count > 0) {
+        // flush counter, unless this is the first value (count = 0)
+        writeVarUint(this, this.count - 1); // since count is always > 0, we can decrement by one. non-standard encoding ftw
+      }
+      this.count = 1;
+      // write first value
+      this.w(this, v);
+      this.s = v;
+    }
+  }
+}
+
+/**
+ * @param {UintOptRleEncoder} encoder
+ */
+const flushUintOptRleEncoder = encoder => {
+  if (encoder.count > 0) {
+    // flush counter, unless this is the first value (count = 0)
+    // case 1: just a single value. set sign to positive
+    // case 2: write several values. set sign to negative to indicate that there is a length coming
+    writeVarInt(encoder.encoder, encoder.count === 1 ? encoder.s : -encoder.s);
+    if (encoder.count > 1) {
+      writeVarUint(encoder.encoder, encoder.count - 2); // since count is always > 1, we can decrement by one. non-standard encoding ftw
+    }
+  }
+};
+
+/**
+ * Optimized Rle encoder that does not suffer from the mentioned problem of the basic Rle encoder.
+ *
+ * Internally uses VarInt encoder to write unsigned integers. If the input occurs multiple times, we write
+ * write it as a negative number. The UintOptRleDecoder then understands that it needs to read a count.
+ *
+ * Encodes [1,2,3,3,3] as [1,2,-3,3] (once 1, once 2, three times 3)
+ */
+class UintOptRleEncoder {
+  constructor () {
+    this.encoder = new Encoder();
+    /**
+     * @type {number}
+     */
+    this.s = 0;
+    this.count = 0;
+  }
+
+  /**
+   * @param {number} v
+   */
+  write (v) {
+    if (this.s === v) {
+      this.count++;
+    } else {
+      flushUintOptRleEncoder(this);
+      this.count = 1;
+      this.s = v;
+    }
+  }
+
+  toUint8Array () {
+    flushUintOptRleEncoder(this);
+    return toUint8Array(this.encoder)
+  }
+}
+
+/**
+ * @param {IntDiffOptRleEncoder} encoder
+ */
+const flushIntDiffOptRleEncoder = encoder => {
+  if (encoder.count > 0) {
+    //          31 bit making up the diff | wether to write the counter
+    const encodedDiff = encoder.diff << 1 | (encoder.count === 1 ? 0 : 1);
+    // flush counter, unless this is the first value (count = 0)
+    // case 1: just a single value. set first bit to positive
+    // case 2: write several values. set first bit to negative to indicate that there is a length coming
+    writeVarInt(encoder.encoder, encodedDiff);
+    if (encoder.count > 1) {
+      writeVarUint(encoder.encoder, encoder.count - 2); // since count is always > 1, we can decrement by one. non-standard encoding ftw
+    }
+  }
+};
+
+/**
+ * A combination of the IntDiffEncoder and the UintOptRleEncoder.
+ *
+ * The count approach is similar to the UintDiffOptRleEncoder, but instead of using the negative bitflag, it encodes
+ * in the LSB whether a count is to be read. Therefore this Encoder only supports 31 bit integers!
+ *
+ * Encodes [1, 2, 3, 2] as [3, 1, 6, -1] (more specifically [(1 << 1) | 1, (3 << 0) | 0, -1])
+ *
+ * Internally uses variable length encoding. Contrary to normal UintVar encoding, the first byte contains:
+ * * 1 bit that denotes whether the next value is a count (LSB)
+ * * 1 bit that denotes whether this value is negative (MSB - 1)
+ * * 1 bit that denotes whether to continue reading the variable length integer (MSB)
+ *
+ * Therefore, only five bits remain to encode diff ranges.
+ *
+ * Use this Encoder only when appropriate. In most cases, this is probably a bad idea.
+ */
+class IntDiffOptRleEncoder {
+  constructor () {
+    this.encoder = new Encoder();
+    /**
+     * @type {number}
+     */
+    this.s = 0;
+    this.count = 0;
+    this.diff = 0;
+  }
+
+  /**
+   * @param {number} v
+   */
+  write (v) {
+    if (this.diff === v - this.s) {
+      this.s = v;
+      this.count++;
+    } else {
+      flushIntDiffOptRleEncoder(this);
+      this.count = 1;
+      this.diff = v - this.s;
+      this.s = v;
+    }
+  }
+
+  toUint8Array () {
+    flushIntDiffOptRleEncoder(this);
+    return toUint8Array(this.encoder)
+  }
+}
+
+/**
+ * Optimized String Encoder.
+ *
+ * Encoding many small strings in a simple Encoder is not very efficient. The function call to decode a string takes some time and creates references that must be eventually deleted.
+ * In practice, when decoding several million small strings, the GC will kick in more and more often to collect orphaned string objects (or maybe there is another reason?).
+ *
+ * This string encoder solves the above problem. All strings are concatenated and written as a single string using a single encoding call.
+ *
+ * The lengths are encoded using a UintOptRleEncoder.
+ */
+class StringEncoder {
+  constructor () {
+    /**
+     * @type {Array<string>}
+     */
+    this.sarr = [];
+    this.s = '';
+    this.lensE = new UintOptRleEncoder();
+  }
+
+  /**
+   * @param {string} string
+   */
+  write (string) {
+    this.s += string;
+    if (this.s.length > 19) {
+      this.sarr.push(this.s);
+      this.s = '';
+    }
+    this.lensE.write(string.length);
+  }
+
+  toUint8Array () {
+    const encoder = new Encoder();
+    this.sarr.push(this.s);
+    this.s = '';
+    writeVarString(encoder, this.sarr.join(''));
+    writeUint8Array(encoder, this.lensE.toUint8Array());
+    return toUint8Array(encoder)
+  }
+}
+
+/**
  * Efficient schema-less binary decoding with support for variable length encoding.
  *
  * Use [lib0/decoding] with [lib0/encoding]. Every encoding function has a corresponding decoding function.
@@ -953,6 +2022,13 @@ class Decoder {
  * @return {Decoder}
  */
 const createDecoder = uint8Array => new Decoder(uint8Array);
+
+/**
+ * @function
+ * @param {Decoder} decoder
+ * @return {boolean}
+ */
+const hasContent = decoder => decoder.pos !== decoder.arr.length;
 
 /**
  * Create an Uint8Array view of the next `len` bytes and advance the position by `len`.
@@ -1023,6 +2099,7 @@ const readVarUint = decoder => {
  * 1/8th of the storage is used as encoding overhead.
  *  * numbers < 2^7 is stored in one bytlength
  *  * numbers < 2^14 is stored in two bylength
+ * @todo This should probably create the inverse ~num if unmber is negative - but this would be a breaking change.
  *
  * @function
  * @param {Decoder} decoder
@@ -1042,7 +2119,7 @@ const readVarInt = decoder => {
     num = num | ((r & BITS7) << len);
     len += 7;
     if (r < BIT8) {
-      return sign * num
+      return sign * (num >>> 0)
     }
     /* istanbul ignore if */
     if (len > 41) {
@@ -1064,8 +2141,30 @@ const readVarInt = decoder => {
  * @param {Decoder} decoder
  * @return {String} The read String.
  */
-const readVarString = decoder =>
-  decodeUtf8(readVarUint8Array(decoder));
+const readVarString = decoder => {
+  let remainingLen = readVarUint(decoder);
+  if (remainingLen === 0) {
+    return ''
+  } else {
+    let encodedString = String.fromCodePoint(readUint8(decoder)); // remember to decrease remainingLen
+    if (--remainingLen < 100) { // do not create a Uint8Array for small strings
+      while (remainingLen--) {
+        encodedString += String.fromCodePoint(readUint8(decoder));
+      }
+    } else {
+      while (remainingLen > 0) {
+        const nextLen = remainingLen < 10000 ? remainingLen : 10000;
+        // this is dangerous, we create a fresh array view from the existing buffer
+        const bytes = decoder.arr.subarray(decoder.pos, decoder.pos + nextLen);
+        decoder.pos += nextLen;
+        // Starting with ES5.1 we can supply a generic array-like object as arguments
+        encodedString += String.fromCodePoint.apply(null, /** @type {any} */ (bytes));
+        remainingLen -= nextLen;
+      }
+    }
+    return decodeURIComponent(escape(encodedString))
+  }
+};
 
 /**
  * @param {Decoder} decoder
@@ -1133,6 +2232,933 @@ const readAnyLookupTable = [
  * @param {Decoder} decoder
  */
 const readAny = decoder => readAnyLookupTable[127 - readUint8(decoder)](decoder);
+
+/**
+ * T must not be null.
+ *
+ * @template T
+ */
+class RleDecoder extends Decoder {
+  /**
+   * @param {Uint8Array} uint8Array
+   * @param {function(Decoder):T} reader
+   */
+  constructor (uint8Array, reader) {
+    super(uint8Array);
+    /**
+     * The reader
+     */
+    this.reader = reader;
+    /**
+     * Current state
+     * @type {T|null}
+     */
+    this.s = null;
+    this.count = 0;
+  }
+
+  read () {
+    if (this.count === 0) {
+      this.s = this.reader(this);
+      if (hasContent(this)) {
+        this.count = readVarUint(this) + 1; // see encoder implementation for the reason why this is incremented
+      } else {
+        this.count = -1; // read the current value forever
+      }
+    }
+    this.count--;
+    return /** @type {T} */ (this.s)
+  }
+}
+
+class UintOptRleDecoder extends Decoder {
+  /**
+   * @param {Uint8Array} uint8Array
+   */
+  constructor (uint8Array) {
+    super(uint8Array);
+    /**
+     * @type {number}
+     */
+    this.s = 0;
+    this.count = 0;
+  }
+
+  read () {
+    if (this.count === 0) {
+      this.s = readVarInt(this);
+      // if the sign is negative, we read the count too, otherwise count is 1
+      const isNegative = isNegativeZero(this.s);
+      this.count = 1;
+      if (isNegative) {
+        this.s = -this.s;
+        this.count = readVarUint(this) + 2;
+      }
+    }
+    this.count--;
+    return /** @type {number} */ (this.s)
+  }
+}
+
+class IntDiffOptRleDecoder extends Decoder {
+  /**
+   * @param {Uint8Array} uint8Array
+   */
+  constructor (uint8Array) {
+    super(uint8Array);
+    /**
+     * @type {number}
+     */
+    this.s = 0;
+    this.count = 0;
+    this.diff = 0;
+  }
+
+  /**
+   * @return {number}
+   */
+  read () {
+    if (this.count === 0) {
+      const diff = readVarInt(this);
+      // if the first bit is set, we read more data
+      const hasCount = diff & 1;
+      this.diff = diff >> 1;
+      this.count = 1;
+      if (hasCount) {
+        this.count = readVarUint(this) + 2;
+      }
+    }
+    this.s += this.diff;
+    this.count--;
+    return this.s
+  }
+}
+
+class StringDecoder {
+  /**
+   * @param {Uint8Array} uint8Array
+   */
+  constructor (uint8Array) {
+    this.decoder = new UintOptRleDecoder(uint8Array);
+    this.str = readVarString(this.decoder);
+    /**
+     * @type {number}
+     */
+    this.spos = 0;
+  }
+
+  /**
+   * @return {string}
+   */
+  read () {
+    const end = this.spos + this.decoder.read();
+    const res = this.str.slice(this.spos, end);
+    this.spos = end;
+    return res
+  }
+}
+
+/**
+ * Utility functions to work with buffers (Uint8Array).
+ *
+ * @module buffer
+ */
+
+/**
+ * @param {number} len
+ */
+const createUint8ArrayFromLen = len => new Uint8Array(len);
+
+/**
+ * Create Uint8Array with initial content from buffer
+ *
+ * @param {ArrayBuffer} buffer
+ * @param {number} byteOffset
+ * @param {number} length
+ */
+const createUint8ArrayViewFromArrayBuffer = (buffer, byteOffset, length) => new Uint8Array(buffer, byteOffset, length);
+
+/* istanbul ignore next */
+/**
+ * @param {string} s
+ * @return {Uint8Array}
+ */
+const fromBase64Browser = s => {
+  // eslint-disable-next-line no-undef
+  const a = atob(s);
+  const bytes = createUint8ArrayFromLen(a.length);
+  for (let i = 0; i < a.length; i++) {
+    bytes[i] = a.charCodeAt(i);
+  }
+  return bytes
+};
+
+/**
+ * @param {string} s
+ */
+const fromBase64Node = s => {
+  const buf = Buffer.from(s, 'base64');
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+};
+
+/* istanbul ignore next */
+const fromBase64 = isBrowser ? fromBase64Browser : fromBase64Node;
+
+/**
+ * Copy the content of an Uint8Array view to a new ArrayBuffer.
+ *
+ * @param {Uint8Array} uint8Array
+ * @return {Uint8Array}
+ */
+const copyUint8Array = uint8Array => {
+  const newBuf = createUint8ArrayFromLen(uint8Array.byteLength);
+  newBuf.set(uint8Array);
+  return newBuf
+};
+
+/**
+ * Fast Pseudo Random Number Generators.
+ *
+ * Given a seed a PRNG generates a sequence of numbers that cannot be reasonably predicted.
+ * Two PRNGs must generate the same random sequence of numbers if  given the same seed.
+ *
+ * @module prng
+ */
+
+/**
+ * Description of the function
+ *  @callback generatorNext
+ *  @return {number} A 32bit integer
+ */
+
+/**
+ * A random type generator.
+ *
+ * @typedef {Object} PRNG
+ * @property {generatorNext} next Generate new number
+ */
+
+const DefaultPRNG = Xoroshiro128plus;
+
+/**
+ * Create a Xoroshiro128plus Pseudo-Random-Number-Generator.
+ * This is the fastest full-period generator passing BigCrush without systematic failures.
+ * But there are more PRNGs available in ./PRNG/.
+ *
+ * @param {number} seed A positive 32bit integer. Do not use negative numbers.
+ * @return {PRNG}
+ */
+const create$3 = seed => new DefaultPRNG(seed);
+
+/**
+ * Generates a single random bool.
+ *
+ * @param {PRNG} gen A random number generator.
+ * @return {Boolean} A random boolean
+ */
+const bool = gen => (gen.next() >= 0.5);
+
+/**
+ * Generates a random integer with 32 bit resolution.
+ *
+ * @param {PRNG} gen A random number generator.
+ * @param {Number} min The lower bound of the allowed return values (inclusive).
+ * @param {Number} max The upper bound of the allowed return values (inclusive).
+ * @return {Number} A random integer on [min, max]
+ */
+const int32 = (gen, min, max) => floor(gen.next() * (max + 1 - min) + min);
+
+/**
+ * Generates a random integer with 53 bit resolution.
+ *
+ * @param {PRNG} gen A random number generator.
+ * @param {Number} min The lower bound of the allowed return values (inclusive).
+ * @param {Number} max The upper bound of the allowed return values (inclusive).
+ * @return {Number} A random integer on [min, max]
+ */
+const uint32$1 = (gen, min, max) => int32(gen, min, max) >>> 0;
+
+/**
+ * @deprecated
+ * Optimized version of prng.int32. It has the same precision as prng.int32, but should be preferred when
+ * openaring on smaller ranges.
+ *
+ * @param {PRNG} gen A random number generator.
+ * @param {Number} min The lower bound of the allowed return values (inclusive).
+ * @param {Number} max The upper bound of the allowed return values (inclusive). The max inclusive number is `binary.BITS31-1`
+ * @return {Number} A random integer on [min, max]
+ */
+const int31 = (gen, min, max) => int32(gen, min, max);
+
+/**
+ * @param {PRNG} gen
+ * @return {string} A single letter (a-z)
+ */
+const letter = gen => fromCharCode(int31(gen, 97, 122));
+
+/**
+ * @param {PRNG} gen
+ * @param {number} [minLen=0]
+ * @param {number} [maxLen=20]
+ * @return {string} A random word (0-20 characters) without spaces consisting of letters (a-z)
+ */
+const word = (gen, minLen = 0, maxLen = 20) => {
+  const len = int31(gen, minLen, maxLen);
+  let str = '';
+  for (let i = 0; i < len; i++) {
+    str += letter(gen);
+  }
+  return str
+};
+
+/**
+ * TODO: this function produces invalid runes. Does not cover all of utf16!!
+ *
+ * @param {PRNG} gen
+ * @return {string}
+ */
+const utf16Rune = gen => {
+  const codepoint = int31(gen, 0, 256);
+  return fromCodePoint(codepoint)
+};
+
+/**
+ * @param {PRNG} gen
+ * @param {number} [maxlen = 20]
+ */
+const utf16String = (gen, maxlen = 20) => {
+  const len = int31(gen, 0, maxlen);
+  let str = '';
+  for (let i = 0; i < len; i++) {
+    str += utf16Rune(gen);
+  }
+  return str
+};
+
+/**
+ * Returns one element of a given array.
+ *
+ * @param {PRNG} gen A random number generator.
+ * @param {Array<T>} array Non empty Array of possible values.
+ * @return {T} One of the values of the supplied Array.
+ * @template T
+ */
+const oneOf = (gen, array) => array[int31(gen, 0, array.length - 1)];
+
+/**
+ * Utility helpers for generating statistics.
+ *
+ * @module statistics
+ */
+
+/**
+ * @param {Array<number>} arr Array of values
+ * @return {number} Returns null if the array is empty
+ */
+const median = arr => arr.length === 0 ? NaN : (arr.length % 2 === 1 ? arr[(arr.length - 1) / 2] : (arr[floor((arr.length - 1) / 2)] + arr[ceil((arr.length - 1) / 2)]) / 2);
+
+/**
+ * @param {Array<number>} arr
+ * @return {number}
+ */
+const average = arr => arr.reduce(add, 0) / arr.length;
+
+/**
+ * Utility helpers to work with promises.
+ *
+ * @module promise
+ */
+
+/**
+ * Checks if an object is a promise using ducktyping.
+ *
+ * Promises are often polyfilled, so it makes sense to add some additional guarantees if the user of this
+ * library has some insane environment where global Promise objects are overwritten.
+ *
+ * @param {any} p
+ * @return {boolean}
+ */
+const isPromise = p => p instanceof Promise || (p && p.then && p.catch && p.finally);
+
+/**
+ * Testing framework with support for generating tests.
+ *
+ * ```js
+ * // test.js template for creating a test executable
+ * import { runTests } from 'lib0/testing.js'
+ * import * as log from 'lib0/logging.js'
+ * import * as mod1 from './mod1.test.js'
+ * import * as mod2 from './mod2.test.js'
+
+ * import { isBrowser, isNode } from 'lib0/environment.js'
+ *
+ * if (isBrowser) {
+ *   // optional: if this is ran in the browser, attach a virtual console to the dom
+ *   log.createVConsole(document.body)
+ * }
+ *
+ * runTests({
+ *  mod1,
+ *  mod2,
+ * }).then(success => {
+ *   if (isNode) {
+ *     process.exit(success ? 0 : 1)
+ *   }
+ * })
+ * ```
+ *
+ * ```js
+ * // mod1.test.js
+ * /**
+ *  * runTests automatically tests all exported functions that start with "test".
+ *  * The name of the function should be in camelCase and is used for the logging output.
+ *  *
+ *  * @param {t.TestCase} tc
+ *  *\/
+ * export const testMyFirstTest = tc => {
+ *   t.compare({ a: 4 }, { a: 4 }, 'objects are equal')
+ * }
+ * ```
+ *
+ * Now you can simply run `node test.js` to run your test or run test.js in the browser.
+ *
+ * @module testing
+ */
+
+const extensive = hasConf('extensive');
+
+/* istanbul ignore next */
+const envSeed = hasParam('--seed') ? Number.parseInt(getParam('--seed', '0')) : null;
+
+class TestCase {
+  /**
+   * @param {string} moduleName
+   * @param {string} testName
+   */
+  constructor (moduleName, testName) {
+    /**
+     * @type {string}
+     */
+    this.moduleName = moduleName;
+    /**
+     * @type {string}
+     */
+    this.testName = testName;
+    this._seed = null;
+    this._prng = null;
+  }
+
+  resetSeed () {
+    this._seed = null;
+    this._prng = null;
+  }
+
+  /**
+   * @type {number}
+   */
+  /* istanbul ignore next */
+  get seed () {
+    /* istanbul ignore else */
+    if (this._seed === null) {
+      /* istanbul ignore next */
+      this._seed = envSeed === null ? uint32() : envSeed;
+    }
+    return this._seed
+  }
+
+  /**
+   * A PRNG for this test case. Use only this PRNG for randomness to make the test case reproducible.
+   *
+   * @type {prng.PRNG}
+   */
+  get prng () {
+    /* istanbul ignore else */
+    if (this._prng === null) {
+      this._prng = create$3(this.seed);
+    }
+    return this._prng
+  }
+}
+
+const repititionTime = Number(getParam('--repitition-time', '50'));
+/* istanbul ignore next */
+const testFilter = hasParam('--filter') ? getParam('--filter', '') : null;
+
+/* istanbul ignore next */
+const testFilterRegExp = testFilter !== null ? new RegExp(testFilter) : new RegExp('.*');
+
+const repeatTestRegex = /^(repeat|repeating)\s/;
+
+/**
+ * @param {string} moduleName
+ * @param {string} name
+ * @param {function(TestCase):void|Promise<any>} f
+ * @param {number} i
+ * @param {number} numberOfTests
+ */
+const run = async (moduleName, name, f, i, numberOfTests) => {
+  const uncamelized = fromCamelCase(name.slice(4), ' ');
+  const filtered = !testFilterRegExp.test(`[${i + 1}/${numberOfTests}] ${moduleName}: ${uncamelized}`);
+  /* istanbul ignore if */
+  if (filtered) {
+    return true
+  }
+  const tc = new TestCase(moduleName, name);
+  const repeat = repeatTestRegex.test(uncamelized);
+  const groupArgs = [GREY, `[${i + 1}/${numberOfTests}] `, PURPLE, `${moduleName}: `, BLUE, uncamelized];
+  /* istanbul ignore next */
+  if (testFilter === null) {
+    groupCollapsed(...groupArgs);
+  } else {
+    group(...groupArgs);
+  }
+  const times = [];
+  const start = performance.now();
+  let lastTime = start;
+  let err = null;
+  performance.mark(`${name}-start`);
+  do {
+    try {
+      const p = f(tc);
+      if (isPromise(p)) {
+        await p;
+      }
+    } catch (_err) {
+      err = _err;
+    }
+    const currTime = performance.now();
+    times.push(currTime - lastTime);
+    lastTime = currTime;
+    if (repeat && err === null && (lastTime - start) < repititionTime) {
+      tc.resetSeed();
+    } else {
+      break
+    }
+  } while (err === null && (lastTime - start) < repititionTime)
+  performance.mark(`${name}-end`);
+  /* istanbul ignore if */
+  if (err !== null && err.constructor !== SkipError) {
+    printError(err);
+  }
+  performance.measure(name, `${name}-start`, `${name}-end`);
+  groupEnd();
+  const duration = lastTime - start;
+  let success = true;
+  times.sort((a, b) => a - b);
+  /* istanbul ignore next */
+  const againMessage = isBrowser
+    ? `     - ${window.location.href}?filter=\\[${i + 1}/${tc._seed === null ? '' : `&seed=${tc._seed}`}`
+    : `\nrepeat: npm run test -- --filter "\\[${i + 1}/" ${tc._seed === null ? '' : `--seed ${tc._seed}`}`;
+  const timeInfo = (repeat && err === null)
+    ? ` - ${times.length} repititions in ${humanizeDuration(duration)} (best: ${humanizeDuration(times[0])}, worst: ${humanizeDuration(last(times))}, median: ${humanizeDuration(median(times))}, average: ${humanizeDuration(average(times))})`
+    : ` in ${humanizeDuration(duration)}`;
+  if (err !== null) {
+    /* istanbul ignore else */
+    if (err.constructor === SkipError) {
+      print(GREY, BOLD, 'Skipped: ', UNBOLD, uncamelized);
+    } else {
+      success = false;
+      print(RED, BOLD, 'Failure: ', UNBOLD, UNCOLOR, uncamelized, GREY, timeInfo, againMessage);
+    }
+  } else {
+    print(GREEN, BOLD, 'Success: ', UNBOLD, UNCOLOR, uncamelized, GREY, timeInfo, againMessage);
+  }
+  return success
+};
+
+/**
+ * Describe what you are currently testing. The message will be logged.
+ *
+ * ```js
+ * export const testMyFirstTest = tc => {
+ *   t.describe('crunching numbers', 'already crunched 4 numbers!') // the optional second argument can describe the state.
+ * }
+ * ```
+ *
+ * @param {string} description
+ * @param {string} info
+ */
+const describe = (description, info = '') => print(BLUE, description, ' ', GREY, info);
+
+/**
+ * Measure the time that it takes to calculate something.
+ *
+ * ```js
+ * export const testMyFirstTest = async tc => {
+ *   t.measureTime('measurement', () => {
+ *     heavyCalculation()
+ *   })
+ *   await t.groupAsync('async measurement', async () => {
+ *     await heavyAsyncCalculation()
+ *   })
+ * }
+ * ```
+ *
+ * @param {string} message
+ * @param {function():void} f
+ * @return {number} Returns a promise that resolves the measured duration to apply f
+ */
+const measureTime = (message, f) => {
+  let duration;
+  const start = performance.now();
+  try {
+    f();
+  } finally {
+    duration = performance.now() - start;
+    print(PURPLE, message, GREY, ` ${humanizeDuration(duration)}`);
+  }
+  return duration
+};
+
+/**
+ * @template T
+ * @param {Array<T>} as
+ * @param {Array<T>} bs
+ * @param {string} [m]
+ * @return {boolean}
+ */
+const compareArrays = (as, bs, m = 'Arrays match') => {
+  if (as.length !== bs.length) {
+    fail(m);
+  }
+  for (let i = 0; i < as.length; i++) {
+    if (as[i] !== bs[i]) {
+      fail(m);
+    }
+  }
+  return true
+};
+
+/**
+ * @param {string} a
+ * @param {string} b
+ * @param {string} [m]
+ * @throws {TestError} Throws if tests fails
+ */
+const compareStrings = (a, b, m = 'Strings match') => {
+  if (a !== b) {
+    const diff = simpleDiff(a, b);
+    print(GREY, a.slice(0, diff.index), RED, a.slice(diff.index, diff.remove), GREEN, diff.insert, GREY, a.slice(diff.index + diff.remove));
+    fail(m);
+  }
+};
+
+/**
+ * @param {any} constructor
+ * @param {any} a
+ * @param {any} b
+ * @param {string} path
+ * @throws {TestError}
+ */
+const compareValues = (constructor, a, b, path) => {
+  if (a !== b) {
+    fail(`Values ${stringify(a)} and ${stringify(b)} don't match (${path})`);
+  }
+  return true
+};
+
+/**
+ * @param {string?} message
+ * @param {string} reason
+ * @param {string} path
+ * @throws {TestError}
+ */
+const _failMessage = (message, reason, path) => fail(
+  message === null
+    ? `${reason} ${path}`
+    : `${message} (${reason}) ${path}`
+);
+
+/**
+ * @param {any} a
+ * @param {any} b
+ * @param {string} path
+ * @param {string?} message
+ * @param {function(any,any,any,string,any):boolean} customCompare
+ */
+const _compare = (a, b, path, message, customCompare) => {
+  // we don't use assert here because we want to test all branches (istanbul errors if one branch is not tested)
+  if (a == null || b == null) {
+    return compareValues(null, a, b, path)
+  }
+  if (a.constructor !== b.constructor) {
+    _failMessage(message, 'Constructors don\'t match', path);
+  }
+  let success = true;
+  switch (a.constructor) {
+    case ArrayBuffer:
+      a = new Uint8Array(a);
+      b = new Uint8Array(b);
+    // eslint-disable-next-line no-fallthrough
+    case Uint8Array: {
+      if (a.byteLength !== b.byteLength) {
+        _failMessage(message, 'ArrayBuffer lengths match', path);
+      }
+      for (let i = 0; success && i < a.length; i++) {
+        success = success && a[i] === b[i];
+      }
+      break
+    }
+    case Set: {
+      if (a.size !== b.size) {
+        _failMessage(message, 'Sets have different number of attributes', path);
+      }
+      // @ts-ignore
+      a.forEach(value => {
+        if (!b.has(value)) {
+          _failMessage(message, `b.${path} does have ${value}`, path);
+        }
+      });
+      break
+    }
+    case Map: {
+      if (a.size !== b.size) {
+        _failMessage(message, 'Maps have different number of attributes', path);
+      }
+      // @ts-ignore
+      a.forEach((value, key) => {
+        if (!b.has(key)) {
+          _failMessage(message, `Property ${path}["${key}"] does not exist on second argument`, path);
+        }
+        _compare(value, b.get(key), `${path}["${key}"]`, message, customCompare);
+      });
+      break
+    }
+    case Object:
+      if (length(a) !== length(b)) {
+        _failMessage(message, 'Objects have a different number of attributes', path);
+      }
+      forEach$1(a, (value, key) => {
+        if (!hasProperty(b, key)) {
+          _failMessage(message, `Property ${path} does not exist on second argument`, path);
+        }
+        _compare(value, b[key], `${path}["${key}"]`, message, customCompare);
+      });
+      break
+    case Array:
+      if (a.length !== b.length) {
+        _failMessage(message, 'Arrays have a different number of attributes', path);
+      }
+      // @ts-ignore
+      a.forEach((value, i) => _compare(value, b[i], `${path}[${i}]`, message, customCompare));
+      break
+    /* istanbul ignore next */
+    default:
+      if (!customCompare(a.constructor, a, b, path, compareValues)) {
+        _failMessage(message, `Values ${stringify(a)} and ${stringify(b)} don't match`, path);
+      }
+  }
+  assert(success, message);
+  return true
+};
+
+/**
+ * @template T
+ * @param {T} a
+ * @param {T} b
+ * @param {string?} [message]
+ * @param {function(any,T,T,string,any):boolean} [customCompare]
+ */
+const compare = (a, b, message = null, customCompare = compareValues) => _compare(a, b, 'obj', message, customCompare);
+
+/* istanbul ignore next */
+/**
+ * @param {boolean} condition
+ * @param {string?} [message]
+ * @throws {TestError}
+ */
+const assert = (condition, message = null) => condition || fail(`Assertion failed${message !== null ? `: ${message}` : ''}`);
+
+/**
+ * @param {function():void} f
+ * @throws {TestError}
+ */
+const fails = f => {
+  let err = null;
+  try {
+    f();
+  } catch (_err) {
+    err = _err;
+    print(GREEN, '⇖ This Error was expected');
+  }
+  /* istanbul ignore if */
+  if (err === null) {
+    fail('Expected this to fail');
+  }
+};
+
+/**
+ * @param {Object<string, Object<string, function(TestCase):void|Promise<any>>>} tests
+ */
+const runTests = async tests => {
+  const numberOfTests = map$1(tests, mod => map$1(mod, f => /* istanbul ignore next */ f ? 1 : 0).reduce(add, 0)).reduce(add, 0);
+  let successfulTests = 0;
+  let testnumber = 0;
+  const start = performance.now();
+  for (const modName in tests) {
+    const mod = tests[modName];
+    for (const fname in mod) {
+      const f = mod[fname];
+      /* istanbul ignore else */
+      if (f) {
+        const repeatEachTest = 1;
+        let success = true;
+        for (let i = 0; success && i < repeatEachTest; i++) {
+          success = await run(modName, fname, f, testnumber, numberOfTests);
+        }
+        testnumber++;
+        /* istanbul ignore else */
+        if (success) {
+          successfulTests++;
+        }
+      }
+    }
+  }
+  const end = performance.now();
+  print('');
+  const success = successfulTests === numberOfTests;
+  /* istanbul ignore next */
+  if (success) {
+    /* istanbul ignore next */
+    print(GREEN, BOLD, 'All tests successful!', GREY, UNBOLD, ` in ${humanizeDuration(end - start)}`);
+    /* istanbul ignore next */
+    printImgBase64(nyanCatImage, 50);
+  } else {
+    const failedTests = numberOfTests - successfulTests;
+    print(RED, BOLD, `> ${failedTests} test${failedTests > 1 ? 's' : ''} failed`);
+  }
+  return success
+};
+
+class TestError extends Error {}
+
+/**
+ * @param {string} reason
+ * @throws {TestError}
+ */
+const fail = reason => {
+  print(RED, BOLD, 'X ', UNBOLD, reason);
+  throw new TestError('Test Failed')
+};
+
+class SkipError extends Error {}
+
+/**
+ * @param {boolean} cond If true, this tests will be skipped
+ * @throws {SkipError}
+ */
+const skip = (cond = true) => {
+  if (cond) {
+    throw new SkipError('skipping..')
+  }
+};
+
+// eslint-disable-next-line
+const nyanCatImage = 'R0lGODlhjABMAPcAAMiSE0xMTEzMzUKJzjQ0NFsoKPc7//FM/9mH/z9x0HIiIoKCgmBHN+frGSkZLdDQ0LCwsDk71g0KCUzDdrQQEOFz/8yYdelmBdTiHFxcXDU2erR/mLrTHCgoKK5szBQUFNgSCTk6ymfpCB9VZS2Bl+cGBt2N8kWm0uDcGXhZRUvGq94NCFPhDiwsLGVlZTgqIPMDA1g3aEzS5D6xAURERDtG9JmBjJsZGWs2AD1W6Hp6eswyDeJ4CFNTU1LcEoJRmTMzSd14CTg5ser2GmDzBd17/xkZGUzMvoSMDiEhIfKruCwNAJaWlvRzA8kNDXDrCfi0pe1U/+GS6SZrAB4eHpZwVhoabsx9oiYmJt/TGHFxcYyMjOid0+Zl/0rF6j09PeRr/0zU9DxO6j+z0lXtBtp8qJhMAEssLGhoaPL/GVn/AAsWJ/9/AE3Z/zs9/3cAAOlf/+aa2RIyADo85uhh/0i84WtrazQ0UyMlmDMzPwUFBe16BTMmHau0E03X+g8pMEAoS1MBAf++kkzO8pBaqSZoe9uB/zE0BUQ3Sv///4WFheuiyzo880gzNDIyNissBNqF/8RiAOF2qG5ubj0vL1z6Avl5ASsgGkgUSy8vL/8n/z4zJy8lOv96uEssV1csAN5ZCDQ0Wz1a3tbEGHLeDdYKCg4PATE7PiMVFSoqU83eHEi43gUPAOZ8reGogeKU5dBBC8faHEez2lHYF4bQFMukFtl4CzY3kkzBVJfMGZkAAMfSFf27mP0t//g4/9R6Dfsy/1DRIUnSAPRD/0fMAFQ0Q+l7rnbaD0vEntCDD6rSGtO8GNpUCU/MK07LPNEfC7RaABUWWkgtOst+71v9AfD7GfDw8P19ATtA/NJpAONgB9yL+fm6jzIxMdnNGJxht1/2A9x//9jHGOSX3+5tBP27l35+fk5OTvZ9AhYgTjo0PUhGSDs9+LZjCFf2Aw0IDwcVAA8PD5lwg9+Q7YaChC0kJP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh/wtYTVAgRGF0YVhNUDw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDpGNEM2MUEyMzE0QTRFMTExOUQzRkE3QTBCRDNBMjdBQyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDpERjQ0NEY0QkI2MTcxMUUxOUJEQkUzNUNGQTkwRTU2MiIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDpERjQ0NEY0QUI2MTcxMUUxOUJEQkUzNUNGQTkwRTU2MiIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IFdpbmRvd3MiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo1OEE3RTIwRjcyQTlFMTExOTQ1QkY2QTU5QzVCQjJBOSIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDpGNEM2MUEyMzE0QTRFMTExOUQzRkE3QTBCRDNBMjdBQyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PgH//v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4N/e3dzb2tnY19bV1NPS0dDPzs3My8rJyMfGxcTDwsHAv769vLu6ubi3trW0s7KxsK+urayrqqmop6alpKOioaCfnp2cm5qZmJeWlZSTkpGQj46NjIuKiYiHhoWEg4KBgH9+fXx7enl4d3Z1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';
+
+/**
+ * Utility module to work with sets.
+ *
+ * @module set
+ */
+
+const create$4 = () => new Set();
+
+/**
+ * Observable class prototype.
+ *
+ * @module observable
+ */
+
+/**
+ * Handles named events.
+ *
+ * @template N
+ */
+class Observable {
+  constructor () {
+    /**
+     * Some desc.
+     * @type {Map<N, any>}
+     */
+    this._observers = create();
+  }
+
+  /**
+   * @param {N} name
+   * @param {function} f
+   */
+  on (name, f) {
+    setIfUndefined(this._observers, name, create$4).add(f);
+  }
+
+  /**
+   * @param {N} name
+   * @param {function} f
+   */
+  once (name, f) {
+    /**
+     * @param  {...any} args
+     */
+    const _f = (...args) => {
+      this.off(name, f);
+      f(...args);
+    };
+    this.on(name, _f);
+  }
+
+  /**
+   * @param {N} name
+   * @param {function} f
+   */
+  off (name, f) {
+    const observers = this._observers.get(name);
+    if (observers !== undefined) {
+      observers.delete(f);
+      if (observers.size === 0) {
+        this._observers.delete(name);
+      }
+    }
+  }
+
+  /**
+   * Emit a named event. All registered event listeners that listen to the
+   * specified name will receive the event.
+   *
+   * @todo This should catch exceptions
+   *
+   * @param {N} name The event name.
+   * @param {Array<any>} args The arguments that are applied to the event listener.
+   */
+  emit (name, args) {
+    // copy all listeners to an array first to make sure that no event is emitted to listeners that are subscribed while the event handler is called.
+    return from((this._observers.get(name) || create()).values()).forEach(f => f(...args))
+  }
+
+  destroy () {
+    this._observers = create();
+  }
+}
+
+/**
+ * This is an abstract interface that all Connectors should implement to keep them interchangeable.
+ *
+ * @note This interface is experimental and it is not advised to actually inherit this class.
+ *       It just serves as typing information.
+ *
+ * @extends {Observable<any>}
+ */
+class AbstractConnector extends Observable {
+  /**
+   * @param {Doc} ydoc
+   * @param {any} awareness
+   */
+  constructor (ydoc, awareness) {
+    super();
+    this.doc = ydoc;
+    this.awareness = awareness;
+  }
+}
 
 class DeleteItem {
   /**
@@ -1283,14 +3309,15 @@ const mergeDeleteSets = dss => {
 
 /**
  * @param {DeleteSet} ds
- * @param {ID} id
+ * @param {number} client
+ * @param {number} clock
  * @param {number} length
  *
  * @private
  * @function
  */
-const addToDeleteSet = (ds, id, length) => {
-  setIfUndefined(ds.clients, id.client, () => []).push(new DeleteItem(id.clock, length));
+const addToDeleteSet = (ds, client, clock, length) => {
+  setIfUndefined(ds.clients, client, () => []).push(new DeleteItem(clock, length));
 };
 
 const createDeleteSet = () => new DeleteSet();
@@ -1330,28 +3357,29 @@ const createDeleteSetFromStructStore = ss => {
 };
 
 /**
- * @param {encoding.Encoder} encoder
+ * @param {AbstractDSEncoder} encoder
  * @param {DeleteSet} ds
  *
  * @private
  * @function
  */
 const writeDeleteSet = (encoder, ds) => {
-  writeVarUint(encoder, ds.clients.size);
+  writeVarUint(encoder.restEncoder, ds.clients.size);
   ds.clients.forEach((dsitems, client) => {
-    writeVarUint(encoder, client);
+    encoder.resetDsCurVal();
+    writeVarUint(encoder.restEncoder, client);
     const len = dsitems.length;
-    writeVarUint(encoder, len);
+    writeVarUint(encoder.restEncoder, len);
     for (let i = 0; i < len; i++) {
       const item = dsitems[i];
-      writeVarUint(encoder, item.clock);
-      writeVarUint(encoder, item.len);
+      encoder.writeDsClock(item.clock);
+      encoder.writeDsLen(item.len);
     }
   });
 };
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractDSDecoder} decoder
  * @return {DeleteSet}
  *
  * @private
@@ -1359,19 +3387,27 @@ const writeDeleteSet = (encoder, ds) => {
  */
 const readDeleteSet = decoder => {
   const ds = new DeleteSet();
-  const numClients = readVarUint(decoder);
+  const numClients = readVarUint(decoder.restDecoder);
   for (let i = 0; i < numClients; i++) {
-    const client = readVarUint(decoder);
-    const numberOfDeletes = readVarUint(decoder);
-    for (let i = 0; i < numberOfDeletes; i++) {
-      addToDeleteSet(ds, createID(client, readVarUint(decoder)), readVarUint(decoder));
+    decoder.resetDsCurVal();
+    const client = readVarUint(decoder.restDecoder);
+    const numberOfDeletes = readVarUint(decoder.restDecoder);
+    if (numberOfDeletes > 0) {
+      const dsField = setIfUndefined(ds.clients, client, () => []);
+      for (let i = 0; i < numberOfDeletes; i++) {
+        dsField.push(new DeleteItem(decoder.readDsClock(), decoder.readDsLen()));
+      }
     }
   }
   return ds
 };
 
 /**
- * @param {decoding.Decoder} decoder
+ * @todo YDecoder also contains references to String and other Decoders. Would make sense to exchange YDecoder.toUint8Array for YDecoder.DsToUint8Array()..
+ */
+
+/**
+ * @param {AbstractDSDecoder} decoder
  * @param {Transaction} transaction
  * @param {StructStore} store
  *
@@ -1380,18 +3416,19 @@ const readDeleteSet = decoder => {
  */
 const readAndApplyDeleteSet = (decoder, transaction, store) => {
   const unappliedDS = new DeleteSet();
-  const numClients = readVarUint(decoder);
+  const numClients = readVarUint(decoder.restDecoder);
   for (let i = 0; i < numClients; i++) {
-    const client = readVarUint(decoder);
-    const numberOfDeletes = readVarUint(decoder);
+    decoder.resetDsCurVal();
+    const client = readVarUint(decoder.restDecoder);
+    const numberOfDeletes = readVarUint(decoder.restDecoder);
     const structs = store.clients.get(client) || [];
     const state = getState(store, client);
     for (let i = 0; i < numberOfDeletes; i++) {
-      const clock = readVarUint(decoder);
-      const len = readVarUint(decoder);
+      const clock = decoder.readDsClock();
+      const clockEnd = clock + decoder.readDsLen();
       if (clock < state) {
-        if (state < clock + len) {
-          addToDeleteSet(unappliedDS, createID(client, state), clock + len - state);
+        if (state < clockEnd) {
+          addToDeleteSet(unappliedDS, client, state, clockEnd - state);
         }
         let index = findIndexSS(structs, clock);
         /**
@@ -1408,10 +3445,10 @@ const readAndApplyDeleteSet = (decoder, transaction, store) => {
         while (index < structs.length) {
           // @ts-ignore
           struct = structs[index++];
-          if (struct.id.clock < clock + len) {
+          if (struct.id.clock < clockEnd) {
             if (!struct.deleted) {
-              if (clock + len < struct.id.clock + struct.length) {
-                structs.splice(index, 0, splitItem(transaction, struct, clock + len - struct.id.clock));
+              if (clockEnd < struct.id.clock + struct.length) {
+                structs.splice(index, 0, splitItem(transaction, struct, clockEnd - struct.id.clock));
               }
               struct.delete(transaction);
             }
@@ -1420,113 +3457,17 @@ const readAndApplyDeleteSet = (decoder, transaction, store) => {
           }
         }
       } else {
-        addToDeleteSet(unappliedDS, createID(client, clock), len);
+        addToDeleteSet(unappliedDS, client, clock, clockEnd - clock);
       }
     }
   }
   if (unappliedDS.clients.size > 0) {
     // TODO: no need for encoding+decoding ds anymore
-    const unappliedDSEncoder = createEncoder();
+    const unappliedDSEncoder = new DSEncoderV2();
     writeDeleteSet(unappliedDSEncoder, unappliedDS);
-    store.pendingDeleteReaders.push(createDecoder(toUint8Array(unappliedDSEncoder)));
+    store.pendingDeleteReaders.push(new DSDecoderV2(createDecoder((unappliedDSEncoder.toUint8Array()))));
   }
 };
-
-/**
- * Utility module to work with sets.
- *
- * @module set
- */
-
-const create$1 = () => new Set();
-
-/**
- * Observable class prototype.
- *
- * @module observable
- */
-
-/**
- * Handles named events.
- *
- * @template N
- */
-class Observable {
-  constructor () {
-    /**
-     * Some desc.
-     * @type {Map<N, any>}
-     */
-    this._observers = create();
-  }
-
-  /**
-   * @param {N} name
-   * @param {function} f
-   */
-  on (name, f) {
-    setIfUndefined(this._observers, name, create$1).add(f);
-  }
-
-  /**
-   * @param {N} name
-   * @param {function} f
-   */
-  once (name, f) {
-    /**
-     * @param  {...any} args
-     */
-    const _f = (...args) => {
-      this.off(name, f);
-      f(...args);
-    };
-    this.on(name, _f);
-  }
-
-  /**
-   * @param {N} name
-   * @param {function} f
-   */
-  off (name, f) {
-    const observers = this._observers.get(name);
-    if (observers !== undefined) {
-      observers.delete(f);
-      if (observers.size === 0) {
-        this._observers.delete(name);
-      }
-    }
-  }
-
-  /**
-   * Emit a named event. All registered event listeners that listen to the
-   * specified name will receive the event.
-   *
-   * @todo This should catch exceptions
-   *
-   * @param {N} name The event name.
-   * @param {Array<any>} args The arguments that are applied to the event listener.
-   */
-  emit (name, args) {
-    // copy all listeners to an array first to make sure that no event is emitted to listeners that are subscribed while the event handler is called.
-    return from((this._observers.get(name) || create()).values()).forEach(f => f(...args))
-  }
-
-  destroy () {
-    this._observers = create();
-  }
-}
-
-/**
- * Isomorphic library exports from isomorphic.js.
- *
- * @module isomorphic
- */
-
-const performance = /** @type {any} */ (iso.performance);
-const cryptoRandomBuffer = /** @type {any} */ (iso.cryptoRandomBuffer);
-
-/* istanbul ignore next */
-const uint32 = () => new Uint32Array(cryptoRandomBuffer(4))[0];
 
 /**
  * @module Y
@@ -1641,47 +3582,65 @@ class Doc extends Observable {
 
   /**
    * @template T
-   * @param {string} name
+   * @param {string} [name]
    * @return {YArray<T>}
    *
    * @public
    */
-  getArray (name) {
+  getArray (name = '') {
     // @ts-ignore
     return this.get(name, YArray)
   }
 
   /**
-   * @param {string} name
+   * @param {string} [name]
    * @return {YText}
    *
    * @public
    */
-  getText (name) {
+  getText (name = '') {
     // @ts-ignore
     return this.get(name, YText)
   }
 
   /**
-   * @param {string} name
+   * @param {string} [name]
    * @return {YMap<any>}
    *
    * @public
    */
-  getMap (name) {
+  getMap (name = '') {
     // @ts-ignore
     return this.get(name, YMap)
   }
 
   /**
-   * @param {string} name
+   * @param {string} [name]
    * @return {YXmlFragment}
    *
    * @public
    */
-  getXmlFragment (name) {
+  getXmlFragment (name = '') {
     // @ts-ignore
     return this.get(name, YXmlFragment)
+  }
+
+  /**
+   * Converts the entire document into a js object, recursively traversing each yjs type
+   *
+   * @return {Object<string, any>}
+   */
+  toJSON () {
+    /**
+     * @type {Object<string, any>}
+     */
+    const doc = {};
+
+    this.share.forEach((value, key) => {
+      doc[key] = value.toJSON();
+    });
+
+    return doc
   }
 
   /**
@@ -1710,7 +3669,844 @@ class Doc extends Observable {
 }
 
 /**
- * @param {encoding.Encoder} encoder
+ * Error helpers.
+ *
+ * @module error
+ */
+
+/**
+ * @param {string} s
+ * @return {Error}
+ */
+/* istanbul ignore next */
+const create$5 = s => new Error(s);
+
+/**
+ * @throws {Error}
+ * @return {never}
+ */
+/* istanbul ignore next */
+const methodUnimplemented = () => {
+  throw create$5('Method unimplemented')
+};
+
+/**
+ * @throws {Error}
+ * @return {never}
+ */
+/* istanbul ignore next */
+const unexpectedCase = () => {
+  throw create$5('Unexpected case')
+};
+
+class AbstractDSDecoder {
+  /**
+   * @param {decoding.Decoder} decoder
+   */
+  constructor (decoder) {
+    this.restDecoder = decoder;
+    methodUnimplemented();
+  }
+
+  resetDsCurVal () { }
+
+  /**
+   * @return {number}
+   */
+  readDsClock () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {number}
+   */
+  readDsLen () {
+    methodUnimplemented();
+  }
+}
+
+class AbstractUpdateDecoder extends AbstractDSDecoder {
+  /**
+   * @return {ID}
+   */
+  readLeftID () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {ID}
+   */
+  readRightID () {
+    methodUnimplemented();
+  }
+
+  /**
+   * Read the next client id.
+   * Use this in favor of readID whenever possible to reduce the number of objects created.
+   *
+   * @return {number}
+   */
+  readClient () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {number} info An unsigned 8-bit integer
+   */
+  readInfo () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {string}
+   */
+  readString () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {boolean} isKey
+   */
+  readParentInfo () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {number} info An unsigned 8-bit integer
+   */
+  readTypeRef () {
+    methodUnimplemented();
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @return {number} len
+   */
+  readLen () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {any}
+   */
+  readAny () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {Uint8Array}
+   */
+  readBuf () {
+    methodUnimplemented();
+  }
+
+  /**
+   * Legacy implementation uses JSON parse. We use any-decoding in v2.
+   *
+   * @return {any}
+   */
+  readJSON () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @return {string}
+   */
+  readKey () {
+    methodUnimplemented();
+  }
+}
+
+class DSDecoderV1 {
+  /**
+   * @param {decoding.Decoder} decoder
+   */
+  constructor (decoder) {
+    this.restDecoder = decoder;
+  }
+
+  resetDsCurVal () {
+    // nop
+  }
+
+  /**
+   * @return {number}
+   */
+  readDsClock () {
+    return readVarUint(this.restDecoder)
+  }
+
+  /**
+   * @return {number}
+   */
+  readDsLen () {
+    return readVarUint(this.restDecoder)
+  }
+}
+
+class UpdateDecoderV1 extends DSDecoderV1 {
+  /**
+   * @return {ID}
+   */
+  readLeftID () {
+    return createID(readVarUint(this.restDecoder), readVarUint(this.restDecoder))
+  }
+
+  /**
+   * @return {ID}
+   */
+  readRightID () {
+    return createID(readVarUint(this.restDecoder), readVarUint(this.restDecoder))
+  }
+
+  /**
+   * Read the next client id.
+   * Use this in favor of readID whenever possible to reduce the number of objects created.
+   */
+  readClient () {
+    return readVarUint(this.restDecoder)
+  }
+
+  /**
+   * @return {number} info An unsigned 8-bit integer
+   */
+  readInfo () {
+    return readUint8(this.restDecoder)
+  }
+
+  /**
+   * @return {string}
+   */
+  readString () {
+    return readVarString(this.restDecoder)
+  }
+
+  /**
+   * @return {boolean} isKey
+   */
+  readParentInfo () {
+    return readVarUint(this.restDecoder) === 1
+  }
+
+  /**
+   * @return {number} info An unsigned 8-bit integer
+   */
+  readTypeRef () {
+    return readVarUint(this.restDecoder)
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @return {number} len
+   */
+  readLen () {
+    return readVarUint(this.restDecoder)
+  }
+
+  /**
+   * @return {any}
+   */
+  readAny () {
+    return readAny(this.restDecoder)
+  }
+
+  /**
+   * @return {Uint8Array}
+   */
+  readBuf () {
+    return copyUint8Array(readVarUint8Array(this.restDecoder))
+  }
+
+  /**
+   * Legacy implementation uses JSON parse. We use any-decoding in v2.
+   *
+   * @return {any}
+   */
+  readJSON () {
+    return JSON.parse(readVarString(this.restDecoder))
+  }
+
+  /**
+   * @return {string}
+   */
+  readKey () {
+    return readVarString(this.restDecoder)
+  }
+}
+
+class DSDecoderV2 {
+  /**
+   * @param {decoding.Decoder} decoder
+   */
+  constructor (decoder) {
+    this.dsCurrVal = 0;
+    this.restDecoder = decoder;
+  }
+
+  resetDsCurVal () {
+    this.dsCurrVal = 0;
+  }
+
+  readDsClock () {
+    this.dsCurrVal += readVarUint(this.restDecoder);
+    return this.dsCurrVal
+  }
+
+  readDsLen () {
+    const diff = readVarUint(this.restDecoder) + 1;
+    this.dsCurrVal += diff;
+    return diff
+  }
+}
+
+class UpdateDecoderV2 extends DSDecoderV2 {
+  /**
+   * @param {decoding.Decoder} decoder
+   */
+  constructor (decoder) {
+    super(decoder);
+    /**
+     * List of cached keys. If the keys[id] does not exist, we read a new key
+     * from stringEncoder and push it to keys.
+     *
+     * @type {Array<string>}
+     */
+    this.keys = [];
+    readUint8(decoder); // read feature flag - currently unused
+    this.keyClockDecoder = new IntDiffOptRleDecoder(readVarUint8Array(decoder));
+    this.clientDecoder = new UintOptRleDecoder(readVarUint8Array(decoder));
+    this.leftClockDecoder = new IntDiffOptRleDecoder(readVarUint8Array(decoder));
+    this.rightClockDecoder = new IntDiffOptRleDecoder(readVarUint8Array(decoder));
+    this.infoDecoder = new RleDecoder(readVarUint8Array(decoder), readUint8);
+    this.stringDecoder = new StringDecoder(readVarUint8Array(decoder));
+    this.parentInfoDecoder = new RleDecoder(readVarUint8Array(decoder), readUint8);
+    this.typeRefDecoder = new UintOptRleDecoder(readVarUint8Array(decoder));
+    this.lenDecoder = new UintOptRleDecoder(readVarUint8Array(decoder));
+  }
+
+  /**
+   * @return {ID}
+   */
+  readLeftID () {
+    return new ID(this.clientDecoder.read(), this.leftClockDecoder.read())
+  }
+
+  /**
+   * @return {ID}
+   */
+  readRightID () {
+    return new ID(this.clientDecoder.read(), this.rightClockDecoder.read())
+  }
+
+  /**
+   * Read the next client id.
+   * Use this in favor of readID whenever possible to reduce the number of objects created.
+   */
+  readClient () {
+    return this.clientDecoder.read()
+  }
+
+  /**
+   * @return {number} info An unsigned 8-bit integer
+   */
+  readInfo () {
+    return /** @type {number} */ (this.infoDecoder.read())
+  }
+
+  /**
+   * @return {string}
+   */
+  readString () {
+    return this.stringDecoder.read()
+  }
+
+  /**
+   * @return {boolean}
+   */
+  readParentInfo () {
+    return this.parentInfoDecoder.read() === 1
+  }
+
+  /**
+   * @return {number} An unsigned 8-bit integer
+   */
+  readTypeRef () {
+    return this.typeRefDecoder.read()
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @return {number}
+   */
+  readLen () {
+    return this.lenDecoder.read()
+  }
+
+  /**
+   * @return {any}
+   */
+  readAny () {
+    return readAny(this.restDecoder)
+  }
+
+  /**
+   * @return {Uint8Array}
+   */
+  readBuf () {
+    return readVarUint8Array(this.restDecoder)
+  }
+
+  /**
+   * This is mainly here for legacy purposes.
+   *
+   * Initial we incoded objects using JSON. Now we use the much faster lib0/any-encoder. This method mainly exists for legacy purposes for the v1 encoder.
+   *
+   * @return {any}
+   */
+  readJSON () {
+    return readAny(this.restDecoder)
+  }
+
+  /**
+   * @return {string}
+   */
+  readKey () {
+    const keyClock = this.keyClockDecoder.read();
+    if (keyClock < this.keys.length) {
+      return this.keys[keyClock]
+    } else {
+      const key = this.stringDecoder.read();
+      this.keys.push(key);
+      return key
+    }
+  }
+}
+
+class AbstractDSEncoder {
+  constructor () {
+    this.restEncoder = createEncoder();
+  }
+
+  /**
+   * @return {Uint8Array}
+   */
+  toUint8Array () {
+    methodUnimplemented();
+  }
+
+  /**
+   * Resets the ds value to 0.
+   * The v2 encoder uses this information to reset the initial diff value.
+   */
+  resetDsCurVal () { }
+
+  /**
+   * @param {number} clock
+   */
+  writeDsClock (clock) { }
+
+  /**
+   * @param {number} len
+   */
+  writeDsLen (len) { }
+}
+
+class AbstractUpdateEncoder extends AbstractDSEncoder {
+  /**
+   * @return {Uint8Array}
+   */
+  toUint8Array () {
+    methodUnimplemented();
+  }
+
+  /**
+   * @param {ID} id
+   */
+  writeLeftID (id) { }
+
+  /**
+   * @param {ID} id
+   */
+  writeRightID (id) { }
+
+  /**
+   * Use writeClient and writeClock instead of writeID if possible.
+   * @param {number} client
+   */
+  writeClient (client) { }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeInfo (info) { }
+
+  /**
+   * @param {string} s
+   */
+  writeString (s) { }
+
+  /**
+   * @param {boolean} isYKey
+   */
+  writeParentInfo (isYKey) { }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeTypeRef (info) { }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @param {number} len
+   */
+  writeLen (len) { }
+
+  /**
+   * @param {any} any
+   */
+  writeAny (any) { }
+
+  /**
+   * @param {Uint8Array} buf
+   */
+  writeBuf (buf) { }
+
+  /**
+   * @param {any} embed
+   */
+  writeJSON (embed) { }
+
+  /**
+   * @param {string} key
+   */
+  writeKey (key) { }
+}
+
+class DSEncoderV1 {
+  constructor () {
+    this.restEncoder = new Encoder();
+  }
+
+  toUint8Array () {
+    return toUint8Array(this.restEncoder)
+  }
+
+  resetDsCurVal () {
+    // nop
+  }
+
+  /**
+   * @param {number} clock
+   */
+  writeDsClock (clock) {
+    writeVarUint(this.restEncoder, clock);
+  }
+
+  /**
+   * @param {number} len
+   */
+  writeDsLen (len) {
+    writeVarUint(this.restEncoder, len);
+  }
+}
+
+class UpdateEncoderV1 extends DSEncoderV1 {
+  /**
+   * @param {ID} id
+   */
+  writeLeftID (id) {
+    writeVarUint(this.restEncoder, id.client);
+    writeVarUint(this.restEncoder, id.clock);
+  }
+
+  /**
+   * @param {ID} id
+   */
+  writeRightID (id) {
+    writeVarUint(this.restEncoder, id.client);
+    writeVarUint(this.restEncoder, id.clock);
+  }
+
+  /**
+   * Use writeClient and writeClock instead of writeID if possible.
+   * @param {number} client
+   */
+  writeClient (client) {
+    writeVarUint(this.restEncoder, client);
+  }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeInfo (info) {
+    writeUint8(this.restEncoder, info);
+  }
+
+  /**
+   * @param {string} s
+   */
+  writeString (s) {
+    writeVarString(this.restEncoder, s);
+  }
+
+  /**
+   * @param {boolean} isYKey
+   */
+  writeParentInfo (isYKey) {
+    writeVarUint(this.restEncoder, isYKey ? 1 : 0);
+  }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeTypeRef (info) {
+    writeVarUint(this.restEncoder, info);
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @param {number} len
+   */
+  writeLen (len) {
+    writeVarUint(this.restEncoder, len);
+  }
+
+  /**
+   * @param {any} any
+   */
+  writeAny (any) {
+    writeAny(this.restEncoder, any);
+  }
+
+  /**
+   * @param {Uint8Array} buf
+   */
+  writeBuf (buf) {
+    writeVarUint8Array(this.restEncoder, buf);
+  }
+
+  /**
+   * @param {any} embed
+   */
+  writeJSON (embed) {
+    writeVarString(this.restEncoder, JSON.stringify(embed));
+  }
+
+  /**
+   * @param {string} key
+   */
+  writeKey (key) {
+    writeVarString(this.restEncoder, key);
+  }
+}
+
+class DSEncoderV2 {
+  constructor () {
+    this.restEncoder = new Encoder(); // encodes all the rest / non-optimized
+    this.dsCurrVal = 0;
+  }
+
+  toUint8Array () {
+    return toUint8Array(this.restEncoder)
+  }
+
+  resetDsCurVal () {
+    this.dsCurrVal = 0;
+  }
+
+  /**
+   * @param {number} clock
+   */
+  writeDsClock (clock) {
+    const diff = clock - this.dsCurrVal;
+    this.dsCurrVal = clock;
+    writeVarUint(this.restEncoder, diff);
+  }
+
+  /**
+   * @param {number} len
+   */
+  writeDsLen (len) {
+    if (len === 0) {
+      unexpectedCase();
+    }
+    writeVarUint(this.restEncoder, len - 1);
+    this.dsCurrVal += len;
+  }
+}
+
+class UpdateEncoderV2 extends DSEncoderV2 {
+  constructor () {
+    super();
+    /**
+     * @type {Map<string,number>}
+     */
+    this.keyMap = new Map();
+    /**
+     * Refers to the next uniqe key-identifier to me used.
+     * See writeKey method for more information.
+     *
+     * @type {number}
+     */
+    this.keyClock = 0;
+    this.keyClockEncoder = new IntDiffOptRleEncoder();
+    this.clientEncoder = new UintOptRleEncoder();
+    this.leftClockEncoder = new IntDiffOptRleEncoder();
+    this.rightClockEncoder = new IntDiffOptRleEncoder();
+    this.infoEncoder = new RleEncoder(writeUint8);
+    this.stringEncoder = new StringEncoder();
+    this.parentInfoEncoder = new RleEncoder(writeUint8);
+    this.typeRefEncoder = new UintOptRleEncoder();
+    this.lenEncoder = new UintOptRleEncoder();
+  }
+
+  toUint8Array () {
+    const encoder = createEncoder();
+    writeUint8(encoder, 0); // this is a feature flag that we might use in the future
+    writeVarUint8Array(encoder, this.keyClockEncoder.toUint8Array());
+    writeVarUint8Array(encoder, this.clientEncoder.toUint8Array());
+    writeVarUint8Array(encoder, this.leftClockEncoder.toUint8Array());
+    writeVarUint8Array(encoder, this.rightClockEncoder.toUint8Array());
+    writeVarUint8Array(encoder, toUint8Array(this.infoEncoder));
+    writeVarUint8Array(encoder, this.stringEncoder.toUint8Array());
+    writeVarUint8Array(encoder, toUint8Array(this.parentInfoEncoder));
+    writeVarUint8Array(encoder, this.typeRefEncoder.toUint8Array());
+    writeVarUint8Array(encoder, this.lenEncoder.toUint8Array());
+    // @note The rest encoder is appended! (note the missing var)
+    writeUint8Array(encoder, toUint8Array(this.restEncoder));
+    return toUint8Array(encoder)
+  }
+
+  /**
+   * @param {ID} id
+   */
+  writeLeftID (id) {
+    this.clientEncoder.write(id.client);
+    this.leftClockEncoder.write(id.clock);
+  }
+
+  /**
+   * @param {ID} id
+   */
+  writeRightID (id) {
+    this.clientEncoder.write(id.client);
+    this.rightClockEncoder.write(id.clock);
+  }
+
+  /**
+   * @param {number} client
+   */
+  writeClient (client) {
+    this.clientEncoder.write(client);
+  }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeInfo (info) {
+    this.infoEncoder.write(info);
+  }
+
+  /**
+   * @param {string} s
+   */
+  writeString (s) {
+    this.stringEncoder.write(s);
+  }
+
+  /**
+   * @param {boolean} isYKey
+   */
+  writeParentInfo (isYKey) {
+    this.parentInfoEncoder.write(isYKey ? 1 : 0);
+  }
+
+  /**
+   * @param {number} info An unsigned 8-bit integer
+   */
+  writeTypeRef (info) {
+    this.typeRefEncoder.write(info);
+  }
+
+  /**
+   * Write len of a struct - well suited for Opt RLE encoder.
+   *
+   * @param {number} len
+   */
+  writeLen (len) {
+    this.lenEncoder.write(len);
+  }
+
+  /**
+   * @param {any} any
+   */
+  writeAny (any) {
+    writeAny(this.restEncoder, any);
+  }
+
+  /**
+   * @param {Uint8Array} buf
+   */
+  writeBuf (buf) {
+    writeVarUint8Array(this.restEncoder, buf);
+  }
+
+  /**
+   * This is mainly here for legacy purposes.
+   *
+   * Initial we incoded objects using JSON. Now we use the much faster lib0/any-encoder. This method mainly exists for legacy purposes for the v1 encoder.
+   *
+   * @param {any} embed
+   */
+  writeJSON (embed) {
+    writeAny(this.restEncoder, embed);
+  }
+
+  /**
+   * Property keys are often reused. For example, in y-prosemirror the key `bold` might
+   * occur very often. For a 3d application, the key `position` might occur very often.
+   *
+   * We cache these keys in a Map and refer to them via a unique number.
+   *
+   * @param {string} key
+   */
+  writeKey (key) {
+    const clock = this.keyMap.get(key);
+    if (clock === undefined) {
+      this.keyClockEncoder.write(this.keyClock++);
+      this.stringEncoder.write(key);
+    } else {
+      this.keyClockEncoder.write(this.keyClock++);
+    }
+  }
+}
+
+let DefaultDSEncoder = DSEncoderV1;
+let DefaultDSDecoder = DSDecoderV1;
+let DefaultUpdateEncoder = UpdateEncoderV1;
+let DefaultUpdateDecoder = UpdateDecoderV1;
+
+const useV1Encoding = () => {
+  DefaultDSEncoder = DSEncoderV1;
+  DefaultDSDecoder = DSDecoderV1;
+  DefaultUpdateEncoder = UpdateEncoderV1;
+  DefaultUpdateDecoder = UpdateDecoderV1;
+};
+
+const useV2Encoding = () => {
+  DefaultDSEncoder = DSEncoderV2;
+  DefaultDSDecoder = DSDecoderV2;
+  DefaultUpdateEncoder = UpdateEncoderV2;
+  DefaultUpdateDecoder = UpdateDecoderV2;
+};
+
+/**
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Array<GC|Item>} structs All structs by `client`
  * @param {number} client
  * @param {number} clock write structs starting with `ID(client,clock)`
@@ -1721,8 +4517,9 @@ const writeStructs = (encoder, structs, client, clock) => {
   // write first id
   const startNewStructs = findIndexSS(structs, clock);
   // write # encoded structs
-  writeVarUint(encoder, structs.length - startNewStructs);
-  writeID(encoder, createID(client, clock));
+  writeVarUint(encoder.restEncoder, structs.length - startNewStructs);
+  encoder.writeClient(client);
+  writeVarUint(encoder.restEncoder, clock);
   const firstStruct = structs[startNewStructs];
   // write first struct with an offset
   firstStruct.write(encoder, clock - firstStruct.id.clock);
@@ -1732,7 +4529,7 @@ const writeStructs = (encoder, structs, client, clock) => {
 };
 
 /**
- * @param {encoding.Encoder} encoder
+ * @param {AbstractUpdateEncoder} encoder
  * @param {StructStore} store
  * @param {Map<number,number>} _sm
  *
@@ -1754,7 +4551,7 @@ const writeClientsStructs = (encoder, store, _sm) => {
     }
   });
   // write # states that were updated
-  writeVarUint(encoder, sm.size);
+  writeVarUint(encoder.restEncoder, sm.size);
   // Write items with higher client ids first
   // This heavily improves the conflict algorithm.
   Array.from(sm.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
@@ -1764,7 +4561,7 @@ const writeClientsStructs = (encoder, store, _sm) => {
 };
 
 /**
- * @param {decoding.Decoder} decoder The decoder object to read data from.
+ * @param {AbstractUpdateDecoder} decoder The decoder object to read data from.
  * @param {Map<number,Array<GC|Item>>} clientRefs
  * @param {Doc} doc
  * @return {Map<number,Array<GC|Item>>}
@@ -1773,22 +4570,74 @@ const writeClientsStructs = (encoder, store, _sm) => {
  * @function
  */
 const readClientsStructRefs = (decoder, clientRefs, doc) => {
-  const numOfStateUpdates = readVarUint(decoder);
+  const numOfStateUpdates = readVarUint(decoder.restDecoder);
   for (let i = 0; i < numOfStateUpdates; i++) {
-    const numberOfStructs = readVarUint(decoder);
+    const numberOfStructs = readVarUint(decoder.restDecoder);
     /**
      * @type {Array<GC|Item>}
      */
-    const refs = [];
-    let { client, clock } = readID(decoder);
-    let info, struct;
+    const refs = new Array(numberOfStructs);
+    const client = decoder.readClient();
+    let clock = readVarUint(decoder.restDecoder);
+    // const start = performance.now()
     clientRefs.set(client, refs);
     for (let i = 0; i < numberOfStructs; i++) {
-      info = readUint8(decoder);
-      struct = (BITS5 & info) === 0 ? new GC(createID(client, clock), readVarUint(decoder)) : readItem(decoder, createID(client, clock), info, doc);
-      refs.push(struct);
-      clock += struct.length;
+      const info = decoder.readInfo();
+      if ((BITS5 & info) !== 0) {
+        /**
+         * The optimized implementation doesn't use any variables because inlining variables is faster.
+         * Below a non-optimized version is shown that implements the basic algorithm with
+         * a few comments
+         */
+        const cantCopyParentInfo = (info & (BIT7 | BIT8)) === 0;
+        // If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
+        // and we read the next string as parentYKey.
+        // It indicates how we store/retrieve parent from `y.share`
+        // @type {string|null}
+        const struct = new Item(
+          createID(client, clock),
+          null, // leftd
+          (info & BIT8) === BIT8 ? decoder.readLeftID() : null, // origin
+          null, // right
+          (info & BIT7) === BIT7 ? decoder.readRightID() : null, // right origin
+          cantCopyParentInfo ? (decoder.readParentInfo() ? doc.get(decoder.readString()) : decoder.readLeftID()) : null, // parent
+          cantCopyParentInfo && (info & BIT6) === BIT6 ? decoder.readString() : null, // parentSub
+          readItemContent(decoder, info) // item content
+        );
+        /* A non-optimized implementation of the above algorithm:
+
+        // The item that was originally to the left of this item.
+        const origin = (info & binary.BIT8) === binary.BIT8 ? decoder.readLeftID() : null
+        // The item that was originally to the right of this item.
+        const rightOrigin = (info & binary.BIT7) === binary.BIT7 ? decoder.readRightID() : null
+        const cantCopyParentInfo = (info & (binary.BIT7 | binary.BIT8)) === 0
+        const hasParentYKey = cantCopyParentInfo ? decoder.readParentInfo() : false
+        // If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
+        // and we read the next string as parentYKey.
+        // It indicates how we store/retrieve parent from `y.share`
+        // @type {string|null}
+        const parentYKey = cantCopyParentInfo && hasParentYKey ? decoder.readString() : null
+
+        const struct = new Item(
+          createID(client, clock),
+          null, // leftd
+          origin, // origin
+          null, // right
+          rightOrigin, // right origin
+          cantCopyParentInfo && !hasParentYKey ? decoder.readLeftID() : (parentYKey !== null ? doc.get(parentYKey) : null), // parent
+          cantCopyParentInfo && (info & binary.BIT6) === binary.BIT6 ? decoder.readString() : null, // parentSub
+          readItemContent(decoder, info) // item content
+        )
+        */
+        refs[i] = struct;
+        clock += struct.length;
+      } else {
+        const len = decoder.readLen();
+        refs[i] = new GC(createID(client, clock), len);
+        clock += len;
+      }
     }
+    // console.log('time to read: ', performance.now() - start) // @todo remove
   }
   return clientRefs
 };
@@ -1819,41 +4668,55 @@ const readClientsStructRefs = (decoder, clientRefs, doc) => {
  * @function
  */
 const resumeStructIntegration = (transaction, store) => {
-  const stack = store.pendingStack;
+  const stack = store.pendingStack; // @todo don't forget to append stackhead at the end
   const clientsStructRefs = store.pendingClientsStructRefs;
   // sort them so that we take the higher id first, in case of conflicts the lower id will probably not conflict with the id from the higher user.
   const clientsStructRefsIds = Array.from(clientsStructRefs.keys()).sort((a, b) => a - b);
-  let curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
-  // iterate over all struct readers until we are done
-  while (stack.length !== 0 || clientsStructRefsIds.length > 0) {
-    if (stack.length === 0) {
-      // take any first struct from clientsStructRefs and put it on the stack
-      if (curStructsTarget.i < curStructsTarget.refs.length) {
-        stack.push(curStructsTarget.refs[curStructsTarget.i++]);
+  if (clientsStructRefsIds.length === 0) {
+    return
+  }
+  const getNextStructTarget = () => {
+    let nextStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
+    while (nextStructsTarget.refs.length === nextStructsTarget.i) {
+      clientsStructRefsIds.pop();
+      if (clientsStructRefsIds.length > 0) {
+        nextStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
       } else {
-        clientsStructRefsIds.pop();
-        if (clientsStructRefsIds.length > 0) {
-          curStructsTarget = /** @type {{i:number,refs:Array<GC|Item>}} */ (clientsStructRefs.get(clientsStructRefsIds[clientsStructRefsIds.length - 1]));
-        }
-        continue
+        store.pendingClientsStructRefs.clear();
+        return null
       }
     }
-    const ref = stack[stack.length - 1];
-    const refID = ref.id;
-    const client = refID.client;
-    const refClock = refID.clock;
-    const localClock = getState(store, client);
-    const offset = refClock < localClock ? localClock - refClock : 0;
-    if (refClock + offset !== localClock) {
+    return nextStructsTarget
+  };
+  let curStructsTarget = getNextStructTarget();
+  if (curStructsTarget === null && stack.length === 0) {
+    return
+  }
+  /**
+   * @type {GC|Item}
+   */
+  let stackHead = stack.length > 0
+    ? /** @type {GC|Item} */ (stack.pop())
+    : /** @type {any} */ (curStructsTarget).refs[/** @type {any} */ (curStructsTarget).i++];
+  // caching the state because it is used very often
+  const state = new Map();
+  // iterate over all struct readers until we are done
+  while (true) {
+    const localClock = setIfUndefined(state, stackHead.id.client, () => getState(store, stackHead.id.client));
+    const offset = stackHead.id.clock < localClock ? localClock - stackHead.id.clock : 0;
+    if (stackHead.id.clock + offset !== localClock) {
       // A previous message from this client is missing
       // check if there is a pending structRef with a smaller clock and switch them
-      const structRefs = clientsStructRefs.get(client) || { refs: [], i: 0 };
+      /**
+       * @type {{ refs: Array<GC|Item>, i: number }}
+       */
+      const structRefs = clientsStructRefs.get(stackHead.id.client) || { refs: [], i: 0 };
       if (structRefs.refs.length !== structRefs.i) {
         const r = structRefs.refs[structRefs.i];
-        if (r.id.clock < refClock) {
+        if (r.id.clock < stackHead.id.clock) {
           // put ref with smaller clock on stack instead and continue
-          structRefs.refs[structRefs.i] = ref;
-          stack[stack.length - 1] = r;
+          structRefs.refs[structRefs.i] = stackHead;
+          stackHead = r;
           // sort the set because this approach might bring the list out of order
           structRefs.refs = structRefs.refs.slice(structRefs.i).sort((r1, r2) => r1.id.clock - r2.id.clock);
           structRefs.i = 0;
@@ -1861,22 +4724,42 @@ const resumeStructIntegration = (transaction, store) => {
         }
       }
       // wait until missing struct is available
+      stack.push(stackHead);
       return
     }
-    const missing = ref.getMissing(transaction, store);
-    if (missing !== null) {
+    const missing = stackHead.getMissing(transaction, store);
+    if (missing === null) {
+      if (offset === 0 || offset < stackHead.length) {
+        stackHead.integrate(transaction, offset);
+        state.set(stackHead.id.client, stackHead.id.clock + stackHead.length);
+      }
+      // iterate to next stackHead
+      if (stack.length > 0) {
+        stackHead = /** @type {GC|Item} */ (stack.pop());
+      } else if (curStructsTarget !== null && curStructsTarget.i < curStructsTarget.refs.length) {
+        stackHead = /** @type {GC|Item} */ (curStructsTarget.refs[curStructsTarget.i++]);
+      } else {
+        curStructsTarget = getNextStructTarget();
+        if (curStructsTarget === null) {
+          // we are done!
+          break
+        } else {
+          stackHead = /** @type {GC|Item} */ (curStructsTarget.refs[curStructsTarget.i++]);
+        }
+      }
+    } else {
       // get the struct reader that has the missing struct
+      /**
+       * @type {{ refs: Array<GC|Item>, i: number }}
+       */
       const structRefs = clientsStructRefs.get(missing) || { refs: [], i: 0 };
       if (structRefs.refs.length === structRefs.i) {
         // This update message causally depends on another update message.
+        stack.push(stackHead);
         return
       }
-      stack.push(structRefs.refs[structRefs.i++]);
-    } else {
-      if (offset < ref.length) {
-        ref.integrate(transaction, offset);
-      }
-      stack.pop();
+      stack.push(stackHead);
+      stackHead = structRefs.refs[structRefs.i++];
     }
   }
   store.pendingClientsStructRefs.clear();
@@ -1898,7 +4781,7 @@ const tryResumePendingDeleteReaders = (transaction, store) => {
 };
 
 /**
- * @param {encoding.Encoder} encoder
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Transaction} transaction
  *
  * @private
@@ -1915,7 +4798,7 @@ const writeStructsFromTransaction = (encoder, transaction) => writeClientsStruct
  */
 const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
   const pendingClientsStructRefs = store.pendingClientsStructRefs;
-  for (const [client, structRefs] of clientsStructsRefs) {
+  clientsStructsRefs.forEach((structRefs, client) => {
     const pendingStructRefs = pendingClientsStructRefs.get(client);
     if (pendingStructRefs === undefined) {
       pendingClientsStructRefs.set(client, { refs: structRefs, i: 0 });
@@ -1928,7 +4811,7 @@ const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
       pendingStructRefs.i = 0;
       pendingStructRefs.refs = merged.sort((r1, r2) => r1.id.clock - r2.id.clock);
     }
-  }
+  });
 };
 
 /**
@@ -1936,14 +4819,14 @@ const mergeReadStructsIntoPendingReads = (store, clientsStructsRefs) => {
  */
 const cleanupPendingStructs = pendingClientsStructRefs => {
   // cleanup pendingClientsStructs if not fully finished
-  for (const [client, refs] of pendingClientsStructRefs) {
+  pendingClientsStructRefs.forEach((refs, client) => {
     if (refs.i === refs.refs.length) {
       pendingClientsStructRefs.delete(client);
     } else {
       refs.refs.splice(0, refs.i);
       refs.i = 0;
     }
-  }
+  });
 };
 
 /**
@@ -1951,7 +4834,7 @@ const cleanupPendingStructs = pendingClientsStructRefs => {
  *
  * This is called when data is received from a remote peer.
  *
- * @param {decoding.Decoder} decoder The decoder object to read data from.
+ * @param {AbstractUpdateDecoder} decoder The decoder object to read data from.
  * @param {Transaction} transaction
  * @param {StructStore} store
  *
@@ -1960,12 +4843,47 @@ const cleanupPendingStructs = pendingClientsStructRefs => {
  */
 const readStructs = (decoder, transaction, store) => {
   const clientsStructRefs = new Map();
+  // let start = performance.now()
   readClientsStructRefs(decoder, clientsStructRefs, transaction.doc);
+  // console.log('time to read structs: ', performance.now() - start) // @todo remove
+  // start = performance.now()
   mergeReadStructsIntoPendingReads(store, clientsStructRefs);
+  // console.log('time to merge: ', performance.now() - start) // @todo remove
+  // start = performance.now()
   resumeStructIntegration(transaction, store);
+  // console.log('time to integrate: ', performance.now() - start) // @todo remove
+  // start = performance.now()
   cleanupPendingStructs(store.pendingClientsStructRefs);
+  // console.log('time to cleanup: ', performance.now() - start) // @todo remove
+  // start = performance.now()
   tryResumePendingDeleteReaders(transaction, store);
+  // console.log('time to resume delete readers: ', performance.now() - start) // @todo remove
+  // start = performance.now()
 };
+
+/**
+ * Read and apply a document update.
+ *
+ * This function has the same effect as `applyUpdate` but accepts an decoder.
+ *
+ * @param {decoding.Decoder} decoder
+ * @param {Doc} ydoc
+ * @param {any} [transactionOrigin] This will be stored on `transaction.origin` and `.on('update', (update, origin))`
+ * @param {AbstractUpdateDecoder} [structDecoder]
+ *
+ * @function
+ */
+const readUpdateV2 = (decoder, ydoc, transactionOrigin, structDecoder = new UpdateDecoderV2(decoder)) =>
+  transact(ydoc, transaction => {
+    readStructs(structDecoder, transaction, ydoc.store);
+    let allowDeletes = true;
+    if (typeof transactionOrigin === 'object' && transactionOrigin && transactionOrigin.disableDeletes === true) {
+      allowDeletes = false;
+    }
+    if (allowDeletes) {
+      readAndApplyDeleteSet(structDecoder, transaction, ydoc.store);
+    }
+  }, transactionOrigin, false);
 
 /**
  * Read and apply a document update.
@@ -1978,17 +4896,24 @@ const readStructs = (decoder, transaction, store) => {
  *
  * @function
  */
-const readUpdate = (decoder, ydoc, transactionOrigin) =>
-  transact(ydoc, transaction => {
-    readStructs(decoder, transaction, ydoc.store);
-    let allowDeletes = true;
-    if (typeof transactionOrigin === 'object' && transactionOrigin && transactionOrigin.disableDeletes === true) {
-      allowDeletes = false;
-    }
-    if (allowDeletes) {
-      readAndApplyDeleteSet(decoder, transaction, ydoc.store);
-    }
-  }, transactionOrigin, false);
+const readUpdate = (decoder, ydoc, transactionOrigin) => readUpdateV2(decoder, ydoc, transactionOrigin, new DefaultUpdateDecoder(decoder));
+
+/**
+ * Apply a document update created by, for example, `y.on('update', update => ..)` or `update = encodeStateAsUpdate()`.
+ *
+ * This function has the same effect as `readUpdate` but accepts an Uint8Array instead of a Decoder.
+ *
+ * @param {Doc} ydoc
+ * @param {Uint8Array} update
+ * @param {any} [transactionOrigin] This will be stored on `transaction.origin` and `.on('update', (update, origin))`
+ * @param {typeof UpdateDecoderV1 | typeof UpdateDecoderV2} [YDecoder]
+ *
+ * @function
+ */
+const applyUpdateV2 = (ydoc, update, transactionOrigin, YDecoder = UpdateDecoderV2) => {
+  const decoder = createDecoder(update);
+  readUpdateV2(decoder, ydoc, transactionOrigin, new YDecoder(decoder));
+};
 
 /**
  * Apply a document update created by, for example, `y.on('update', update => ..)` or `update = encodeStateAsUpdate()`.
@@ -2001,14 +4926,13 @@ const readUpdate = (decoder, ydoc, transactionOrigin) =>
  *
  * @function
  */
-const applyUpdate = (ydoc, update, transactionOrigin) =>
-  readUpdate(createDecoder(update), ydoc, transactionOrigin);
+const applyUpdate = (ydoc, update, transactionOrigin) => applyUpdateV2(ydoc, update, transactionOrigin, DefaultUpdateDecoder);
 
 /**
  * Write all the document as a single update message. If you specify the state of the remote client (`targetStateVector`) it will
  * only write the operations that are missing.
  *
- * @param {encoding.Encoder} encoder
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Doc} doc
  * @param {Map<number,number>} [targetStateVector] The state of the target that receives the update. Leave empty to write all known structs
  *
@@ -2027,31 +4951,45 @@ const writeStateAsUpdate = (encoder, doc, targetStateVector = new Map()) => {
  *
  * @param {Doc} doc
  * @param {Uint8Array} [encodedTargetStateVector] The state of the target that receives the update. Leave empty to write all known structs
+ * @param {AbstractUpdateEncoder} [encoder]
  * @return {Uint8Array}
  *
  * @function
  */
-const encodeStateAsUpdate = (doc, encodedTargetStateVector) => {
-  const encoder = createEncoder();
+const encodeStateAsUpdateV2 = (doc, encodedTargetStateVector, encoder = new UpdateEncoderV2()) => {
   const targetStateVector = encodedTargetStateVector == null ? new Map() : decodeStateVector(encodedTargetStateVector);
   writeStateAsUpdate(encoder, doc, targetStateVector);
-  return toUint8Array(encoder)
+  return encoder.toUint8Array()
 };
+
+/**
+ * Write all the document as a single update message that can be applied on the remote document. If you specify the state of the remote client (`targetState`) it will
+ * only write the operations that are missing.
+ *
+ * Use `writeStateAsUpdate` instead if you are working with lib0/encoding.js#Encoder
+ *
+ * @param {Doc} doc
+ * @param {Uint8Array} [encodedTargetStateVector] The state of the target that receives the update. Leave empty to write all known structs
+ * @return {Uint8Array}
+ *
+ * @function
+ */
+const encodeStateAsUpdate = (doc, encodedTargetStateVector) => encodeStateAsUpdateV2(doc, encodedTargetStateVector, new DefaultUpdateEncoder());
 
 /**
  * Read state vector from Decoder and return as Map
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractDSDecoder} decoder
  * @return {Map<number,number>} Maps `client` to the number next expected `clock` from that client.
  *
  * @function
  */
 const readStateVector = decoder => {
   const ss = new Map();
-  const ssLength = readVarUint(decoder);
+  const ssLength = readVarUint(decoder.restDecoder);
   for (let i = 0; i < ssLength; i++) {
-    const client = readVarUint(decoder);
-    const clock = readVarUint(decoder);
+    const client = readVarUint(decoder.restDecoder);
+    const clock = readVarUint(decoder.restDecoder);
     ss.set(client, clock);
   }
   return ss
@@ -2065,28 +5003,34 @@ const readStateVector = decoder => {
  *
  * @function
  */
-const decodeStateVector = decodedState => readStateVector(createDecoder(decodedState));
+const decodeStateVectorV2 = decodedState => readStateVector(new DSDecoderV2(createDecoder(decodedState)));
 
 /**
- * Write State Vector to `lib0/encoding.js#Encoder`.
+ * Read decodedState and return State as Map.
  *
- * @param {encoding.Encoder} encoder
+ * @param {Uint8Array} decodedState
+ * @return {Map<number,number>} Maps `client` to the number next expected `clock` from that client.
+ *
+ * @function
+ */
+const decodeStateVector = decodedState => readStateVector(new DefaultDSDecoder(createDecoder(decodedState)));
+
+/**
+ * @param {AbstractDSEncoder} encoder
  * @param {Map<number,number>} sv
  * @function
  */
 const writeStateVector = (encoder, sv) => {
-  writeVarUint(encoder, sv.size);
+  writeVarUint(encoder.restEncoder, sv.size);
   sv.forEach((clock, client) => {
-    writeVarUint(encoder, client);
-    writeVarUint(encoder, clock);
+    writeVarUint(encoder.restEncoder, client); // @todo use a special client decoder that is based on mapping
+    writeVarUint(encoder.restEncoder, clock);
   });
   return encoder
 };
 
 /**
- * Write State Vector to `lib0/encoding.js#Encoder`.
- *
- * @param {encoding.Encoder} encoder
+ * @param {AbstractDSEncoder} encoder
  * @param {Doc} doc
  *
  * @function
@@ -2097,110 +5041,25 @@ const writeDocumentStateVector = (encoder, doc) => writeStateVector(encoder, get
  * Encode State as Uint8Array.
  *
  * @param {Doc} doc
+ * @param {AbstractDSEncoder} [encoder]
  * @return {Uint8Array}
  *
  * @function
  */
-const encodeStateVector = doc => {
-  const encoder = createEncoder();
+const encodeStateVectorV2 = (doc, encoder = new DSEncoderV2()) => {
   writeDocumentStateVector(encoder, doc);
-  return toUint8Array(encoder)
+  return encoder.toUint8Array()
 };
 
 /**
- * Utility functions for working with EcmaScript objects.
+ * Encode State as Uint8Array.
  *
- * @module object
- */
-
-/**
- * @param {Object<string,any>} obj
- */
-const keys = Object.keys;
-
-/**
- * @param {Object<string,any>} obj
- * @param {function(any,string):any} f
- */
-const forEach = (obj, f) => {
-  for (const key in obj) {
-    f(obj[key], key);
-  }
-};
-
-/**
- * @template R
- * @param {Object<string,any>} obj
- * @param {function(any,string):R} f
- * @return {Array<R>}
- */
-const map$1 = (obj, f) => {
-  const results = [];
-  for (const key in obj) {
-    results.push(f(obj[key], key));
-  }
-  return results
-};
-
-/**
- * @param {Object<string,any>} obj
- * @return {number}
- */
-const length$1 = obj => keys(obj).length;
-
-/**
- * @param {Object<string,any>} obj
- * @param {function(any,string):boolean} f
- * @return {boolean}
- */
-const every = (obj, f) => {
-  for (const key in obj) {
-    if (!f(obj[key], key)) {
-      return false
-    }
-  }
-  return true
-};
-
-/**
- * Calls `Object.prototype.hasOwnProperty`.
+ * @param {Doc} doc
+ * @return {Uint8Array}
  *
- * @param {any} obj
- * @param {string|symbol} key
- * @return {boolean}
+ * @function
  */
-const hasProperty = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
-
-/**
- * @param {Object<string,any>} a
- * @param {Object<string,any>} b
- * @return {boolean}
- */
-const equalFlat = (a, b) => a === b || (length$1(a) === length$1(b) && every(a, (val, key) => (val !== undefined || hasProperty(b, key)) && b[key] === val));
-
-/**
- * Common functions and function call helpers.
- *
- * @module function
- */
-
-/**
- * Calls all functions in `fs` with args. Only throws after all functions were called.
- *
- * @param {Array<function>} fs
- * @param {Array<any>} args
- */
-const callAll = (fs, args, i = 0) => {
-  try {
-    for (; i < fs.length; i++) {
-      fs[i](...args);
-    }
-  } finally {
-    if (i < fs.length) {
-      callAll(fs, args, i + 1);
-    }
-  }
-};
+const encodeStateVector = doc => encodeStateVectorV2(doc, new DefaultDSEncoder());
 
 /**
  * General event handler implementation.
@@ -2283,37 +5142,6 @@ const removeAllEventHandlerListeners = eventHandler => {
 const callEventHandlerListeners = (eventHandler, arg0, arg1) =>
   callAll(eventHandler.l, [arg0, arg1]);
 
-/**
- * Error helpers.
- *
- * @module error
- */
-
-/**
- * @param {string} s
- * @return {Error}
- */
-/* istanbul ignore next */
-const create$2 = s => new Error(s);
-
-/**
- * @throws {Error}
- * @return {never}
- */
-/* istanbul ignore next */
-const methodUnimplemented = () => {
-  throw create$2('Method unimplemented')
-};
-
-/**
- * @throws {Error}
- * @return {never}
- */
-/* istanbul ignore next */
-const unexpectedCase = () => {
-  throw create$2('Unexpected case')
-};
-
 class ID {
   /**
    * @param {number} client client id
@@ -2390,7 +5218,7 @@ const readID = decoder =>
  */
 const findRootTypeKey = type => {
   // @ts-ignore _y must be defined, otherwise unexpected case
-  for (const [key, value] of type.doc.share) {
+  for (const [key, value] of type.doc.share.entries()) {
     if (value === type) {
       return key
     }
@@ -2416,6 +5244,24 @@ const isParentOf = (parent, child) => {
     child = /** @type {AbstractType<any>} */ (child.parent)._item;
   }
   return false
+};
+
+/**
+ * Convenient helper to log type information.
+ *
+ * Do not use in productive systems as the output can be immense!
+ *
+ * @param {AbstractType<any>} type
+ */
+const logType = type => {
+  const res = [];
+  let n = type._start;
+  while (n) {
+    res.push(n);
+    n = n.right;
+  }
+  console.log('Children: ', res);
+  console.log('Children content: ', res.filter(m => !m.deleted).map(m => m.content));
 };
 
 class PermanentUserData {
@@ -2452,12 +5298,12 @@ class PermanentUserData {
         event.changes.added.forEach(item => {
           item.content.getContent().forEach(encodedDs => {
             if (encodedDs instanceof Uint8Array) {
-              this.dss.set(userDescription, mergeDeleteSets([this.dss.get(userDescription) || createDeleteSet(), readDeleteSet(createDecoder(encodedDs))]));
+              this.dss.set(userDescription, mergeDeleteSets([this.dss.get(userDescription) || createDeleteSet(), readDeleteSet(new DSDecoderV1(createDecoder(encodedDs)))]));
             }
           });
         });
       });
-      this.dss.set(userDescription, mergeDeleteSets(ds.map(encodedDs => readDeleteSet(createDecoder(encodedDs)))));
+      this.dss.set(userDescription, mergeDeleteSets(ds.map(encodedDs => readDeleteSet(new DSDecoderV1(encodedDs)))));
       ids.observe(/** @param {YArrayEvent<any>} event */ event =>
         event.changes.added.forEach(item => item.content.getContent().forEach(addClientId))
       );
@@ -2503,11 +5349,11 @@ class PermanentUserData {
               user.get('ids').push([clientid]);
             }
           });
-          const encoder = createEncoder();
+          const encoder = new DSEncoderV1();
           const ds = this.dss.get(userDescription);
           if (ds) {
             writeDeleteSet(encoder, ds);
-            user.get('ds').push([toUint8Array(encoder)]);
+            user.get('ds').push([encoder.toUint8Array()]);
           }
         }
       }, 0);
@@ -2517,9 +5363,9 @@ class PermanentUserData {
         const yds = user.get('ds');
         const ds = transaction.deleteSet;
         if (transaction.local && ds.clients.size > 0 && filter(transaction, ds)) {
-          const encoder = createEncoder();
+          const encoder = new DSEncoderV1();
           writeDeleteSet(encoder, ds);
-          yds.push([toUint8Array(encoder)]);
+          yds.push([encoder.toUint8Array()]);
         }
       });
     });
@@ -2538,7 +5384,7 @@ class PermanentUserData {
    * @return {string | null}
    */
   getUserByDeletedId (id) {
-    for (const [userDescription, ds] of this.dss) {
+    for (const [userDescription, ds] of this.dss.entries()) {
       if (isDeleted(ds, id)) {
         return userDescription
       }
@@ -2833,12 +5679,12 @@ const equalSnapshots = (snap1, snap2) => {
   if (sv1.size !== sv2.size || ds1.size !== ds2.size) {
     return false
   }
-  for (const [key, value] of sv1) {
+  for (const [key, value] of sv1.entries()) {
     if (sv2.get(key) !== value) {
       return false
     }
   }
-  for (const [client, dsitems1] of ds1) {
+  for (const [client, dsitems1] of ds1.entries()) {
     const dsitems2 = ds2.get(client) || [];
     if (dsitems1.length !== dsitems2.length) {
       return false
@@ -2856,23 +5702,35 @@ const equalSnapshots = (snap1, snap2) => {
 
 /**
  * @param {Snapshot} snapshot
+ * @param {AbstractDSEncoder} [encoder]
  * @return {Uint8Array}
  */
-const encodeSnapshot = snapshot => {
-  const encoder = createEncoder();
+const encodeSnapshotV2 = (snapshot, encoder = new DSEncoderV2()) => {
   writeDeleteSet(encoder, snapshot.ds);
   writeStateVector(encoder, snapshot.sv);
-  return toUint8Array(encoder)
+  return encoder.toUint8Array()
+};
+
+/**
+ * @param {Snapshot} snapshot
+ * @return {Uint8Array}
+ */
+const encodeSnapshot = snapshot => encodeSnapshotV2(snapshot, new DefaultDSEncoder());
+
+/**
+ * @param {Uint8Array} buf
+ * @param {AbstractDSDecoder} [decoder]
+ * @return {Snapshot}
+ */
+const decodeSnapshotV2 = (buf, decoder = new DSDecoderV2(createDecoder(buf))) => {
+  return new Snapshot(readDeleteSet(decoder), readStateVector(decoder))
 };
 
 /**
  * @param {Uint8Array} buf
  * @return {Snapshot}
  */
-const decodeSnapshot = buf => {
-  const decoder = createDecoder(buf);
-  return new Snapshot(readDeleteSet(decoder), readStateVector(decoder))
-};
+const decodeSnapshot = buf => decodeSnapshotV2(buf, new DSDecoderV1(createDecoder(buf)));
 
 /**
  * @param {DeleteSet} ds
@@ -2905,7 +5763,7 @@ const isVisible = (item, snapshot) => snapshot === undefined ? !item.deleted : (
  * @param {Snapshot} snapshot
  */
 const splitSnapshotAffectedStructs = (transaction, snapshot) => {
-  const meta = setIfUndefined(transaction.meta, splitSnapshotAffectedStructs, create$1);
+  const meta = setIfUndefined(transaction.meta, splitSnapshotAffectedStructs, create$4);
   const store = transaction.doc.store;
   // check if we already split for this snapshot
   if (!meta.has(snapshot)) {
@@ -2941,7 +5799,7 @@ class StructStore {
      */
     this.pendingStack = [];
     /**
-     * @type {Array<decoding.Decoder>}
+     * @type {Array<DSDecoderV2>}
      */
     this.pendingDeleteReaders = [];
   }
@@ -3184,628 +6042,6 @@ const iterateStructs = (transaction, structs, clockStart, len, f) => {
 };
 
 /**
- * Utility module to work with EcmaScript Symbols.
- *
- * @module symbol
- */
-
-/**
- * Return fresh symbol.
- *
- * @return {Symbol}
- */
-const create$3 = Symbol;
-
-/**
- * Working with value pairs.
- *
- * @module pair
- */
-
-/**
- * @template L,R
- */
-class Pair {
-  /**
-   * @param {L} left
-   * @param {R} right
-   */
-  constructor (left, right) {
-    this.left = left;
-    this.right = right;
-  }
-}
-
-/**
- * @template L,R
- * @param {L} left
- * @param {R} right
- * @return {Pair<L,R>}
- */
-const create$4 = (left, right) => new Pair(left, right);
-
-/**
- * @template L,R
- * @param {Array<Pair<L,R>>} arr
- * @param {function(L, R):any} f
- */
-const forEach$1 = (arr, f) => arr.forEach(p => f(p.left, p.right));
-
-/* eslint-env browser */
-
-/* istanbul ignore next */
-/**
- * @type {Document}
- */
-const doc = /** @type {Document} */ (typeof document !== 'undefined' ? document : {});
-
-/**
- * @param {string} name
- * @return {HTMLElement}
- */
-/* istanbul ignore next */
-const createElement = name => doc.createElement(name);
-
-/**
- * @return {DocumentFragment}
- */
-/* istanbul ignore next */
-const createDocumentFragment = () => doc.createDocumentFragment();
-
-/**
- * @param {string} text
- * @return {Text}
- */
-/* istanbul ignore next */
-const createTextNode = text => doc.createTextNode(text);
-
-/* istanbul ignore next */
-const domParser = /** @type {DOMParser} */ (typeof DOMParser !== 'undefined' ? new DOMParser() : null);
-
-/**
- * @param {Element} el
- * @param {Array<pair.Pair<string,string|boolean>>} attrs Array of key-value pairs
- * @return {Element}
- */
-/* istanbul ignore next */
-const setAttributes = (el, attrs) => {
-  forEach$1(attrs, (key, value) => {
-    if (value === false) {
-      el.removeAttribute(key);
-    } else if (value === true) {
-      el.setAttribute(key, '');
-    } else {
-      // @ts-ignore
-      el.setAttribute(key, value);
-    }
-  });
-  return el
-};
-
-/**
- * @param {Array<Node>|HTMLCollection} children
- * @return {DocumentFragment}
- */
-/* istanbul ignore next */
-const fragment = children => {
-  const fragment = createDocumentFragment();
-  for (let i = 0; i < children.length; i++) {
-    fragment.appendChild(children[i]);
-  }
-  return fragment
-};
-
-/**
- * @param {Element} parent
- * @param {Array<Node>} nodes
- * @return {Element}
- */
-/* istanbul ignore next */
-const append = (parent, nodes) => {
-  parent.appendChild(fragment(nodes));
-  return parent
-};
-
-/**
- * @param {EventTarget} el
- * @param {string} name
- * @param {EventListener} f
- */
-/* istanbul ignore next */
-const addEventListener = (el, name, f) => el.addEventListener(name, f);
-
-/**
- * @param {string} name
- * @param {Array<pair.Pair<string,string>|pair.Pair<string,boolean>>} attrs Array of key-value pairs
- * @param {Array<Node>} children
- * @return {Element}
- */
-/* istanbul ignore next */
-const element = (name, attrs = [], children = []) =>
-  append(setAttributes(createElement(name), attrs), children);
-
-/**
- * @param {string} t
- * @return {Text}
- */
-/* istanbul ignore next */
-const text = createTextNode;
-
-/**
- * @param {Map<string,string>} m
- * @return {string}
- */
-/* istanbul ignore next */
-const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
-
-/**
- * JSON utility functions.
- *
- * @module json
- */
-
-/**
- * Transform JavaScript object to JSON.
- *
- * @param {any} object
- * @return {string}
- */
-const stringify = JSON.stringify;
-
-/* global requestIdleCallback, requestAnimationFrame, cancelIdleCallback, cancelAnimationFrame */
-
-/**
- * Utility module to work with EcmaScript's event loop.
- *
- * @module eventloop
- */
-
-/**
- * @type {Array<function>}
- */
-let queue = [];
-
-const _runQueue = () => {
-  for (let i = 0; i < queue.length; i++) {
-    queue[i]();
-  }
-  queue = [];
-};
-
-/**
- * @param {function():void} f
- */
-const enqueue = f => {
-  queue.push(f);
-  if (queue.length === 1) {
-    setTimeout(_runQueue, 0);
-  }
-};
-
-/**
- * Utility module to convert metric values.
- *
- * @module metric
- */
-
-const prefixUp = ['', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
-const prefixDown = ['', 'm', 'μ', 'n', 'p', 'f', 'a', 'z', 'y'];
-
-/**
- * Calculate the metric prefix for a number. Assumes E.g. `prefix(1000) = { n: 1, prefix: 'k' }`
- *
- * @param {number} n
- * @param {number} [baseMultiplier] Multiplier of the base (10^(3*baseMultiplier)). E.g. `convert(time, -3)` if time is already in milli seconds
- * @return {{n:number,prefix:string}}
- */
-const prefix = (n, baseMultiplier = 0) => {
-  const nPow = n === 0 ? 0 : log10(n);
-  let mult = 0;
-  while (nPow < mult * 3 && baseMultiplier > -8) {
-    baseMultiplier--;
-    mult--;
-  }
-  while (nPow >= 3 + mult * 3 && baseMultiplier < 8) {
-    baseMultiplier++;
-    mult++;
-  }
-  const prefix = baseMultiplier < 0 ? prefixDown[-baseMultiplier] : prefixUp[baseMultiplier];
-  return {
-    n: round((mult > 0 ? n / exp10(mult * 3) : n * exp10(mult * -3)) * 1e12) / 1e12,
-    prefix
-  }
-};
-
-/**
- * Utility module to work with time.
- *
- * @module time
- */
-
-/**
- * Return current unix time.
- *
- * @return {number}
- */
-const getUnixTime = Date.now;
-
-/**
- * Transform time (in ms) to a human readable format. E.g. 1100 => 1.1s. 60s => 1min. .001 => 10μs.
- *
- * @param {number} d duration in milliseconds
- * @return {string} humanized approximation of time
- */
-const humanizeDuration = d => {
-  if (d < 60000) {
-    const p = prefix(d, -1);
-    return round(p.n * 100) / 100 + p.prefix + 's'
-  }
-  d = floor(d / 1000);
-  const seconds = d % 60;
-  const minutes = floor(d / 60) % 60;
-  const hours = floor(d / 3600) % 24;
-  const days = floor(d / 86400);
-  if (days > 0) {
-    return days + 'd' + ((hours > 0 || minutes > 30) ? ' ' + (minutes > 30 ? hours + 1 : hours) + 'h' : '')
-  }
-  if (hours > 0) {
-    /* istanbul ignore next */
-    return hours + 'h' + ((minutes > 0 || seconds > 30) ? ' ' + (seconds > 30 ? minutes + 1 : minutes) + 'min' : '')
-  }
-  return minutes + 'min' + (seconds > 0 ? ' ' + seconds + 's' : '')
-};
-
-/**
- * Isomorphic logging module with support for colors!
- *
- * @module logging
- */
-
-const BOLD = create$3();
-const UNBOLD = create$3();
-const BLUE = create$3();
-const GREY = create$3();
-const GREEN = create$3();
-const RED = create$3();
-const PURPLE = create$3();
-const ORANGE = create$3();
-const UNCOLOR = create$3();
-
-/**
- * @type {Object<Symbol,pair.Pair<string,string>>}
- */
-const _browserStyleMap = {
-  [BOLD]: create$4('font-weight', 'bold'),
-  [UNBOLD]: create$4('font-weight', 'normal'),
-  [BLUE]: create$4('color', 'blue'),
-  [GREEN]: create$4('color', 'green'),
-  [GREY]: create$4('color', 'grey'),
-  [RED]: create$4('color', 'red'),
-  [PURPLE]: create$4('color', 'purple'),
-  [ORANGE]: create$4('color', 'orange'), // not well supported in chrome when debugging node with inspector - TODO: deprecate
-  [UNCOLOR]: create$4('color', 'black')
-};
-
-const _nodeStyleMap = {
-  [BOLD]: '\u001b[1m',
-  [UNBOLD]: '\u001b[2m',
-  [BLUE]: '\x1b[34m',
-  [GREEN]: '\x1b[32m',
-  [GREY]: '\u001b[37m',
-  [RED]: '\x1b[31m',
-  [PURPLE]: '\x1b[35m',
-  [ORANGE]: '\x1b[38;5;208m',
-  [UNCOLOR]: '\x1b[0m'
-};
-
-/* istanbul ignore next */
-/**
- * @param {Array<string|Symbol|Object|number>} args
- * @return {Array<string|object|number>}
- */
-const computeBrowserLoggingArgs = args => {
-  const strBuilder = [];
-  const styles = [];
-  const currentStyle = create();
-  /**
-   * @type {Array<string|Object|number>}
-   */
-  let logArgs = [];
-  // try with formatting until we find something unsupported
-  let i = 0;
-
-  for (; i < args.length; i++) {
-    const arg = args[i];
-    // @ts-ignore
-    const style = _browserStyleMap[arg];
-    if (style !== undefined) {
-      currentStyle.set(style.left, style.right);
-    } else {
-      if (arg.constructor === String || arg.constructor === Number) {
-        const style = mapToStyleString(currentStyle);
-        if (i > 0 || style.length > 0) {
-          strBuilder.push('%c' + arg);
-          styles.push(style);
-        } else {
-          strBuilder.push(arg);
-        }
-      } else {
-        break
-      }
-    }
-  }
-
-  if (i > 0) {
-    // create logArgs with what we have so far
-    logArgs = styles;
-    logArgs.unshift(strBuilder.join(''));
-  }
-  // append the rest
-  for (; i < args.length; i++) {
-    const arg = args[i];
-    if (!(arg instanceof Symbol)) {
-      logArgs.push(arg);
-    }
-  }
-  return logArgs
-};
-
-/**
- * @param {Array<string|Symbol|Object|number>} args
- * @return {Array<string|object|number>}
- */
-const computeNodeLoggingArgs = args => {
-  const strBuilder = [];
-  const logArgs = [];
-
-  // try with formatting until we find something unsupported
-  let i = 0;
-
-  for (; i < args.length; i++) {
-    const arg = args[i];
-    // @ts-ignore
-    const style = _nodeStyleMap[arg];
-    if (style !== undefined) {
-      strBuilder.push(style);
-    } else {
-      if (arg.constructor === String || arg.constructor === Number) {
-        strBuilder.push(arg);
-      } else {
-        break
-      }
-    }
-  }
-  if (i > 0) {
-    // create logArgs with what we have so far
-    strBuilder.push('\x1b[0m');
-    logArgs.push(strBuilder.join(''));
-  }
-  // append the rest
-  for (; i < args.length; i++) {
-    const arg = args[i];
-    /* istanbul ignore else */
-    if (!(arg instanceof Symbol)) {
-      logArgs.push(arg);
-    }
-  }
-  return logArgs
-};
-
-/* istanbul ignore next */
-const computeLoggingArgs = isNode ? computeNodeLoggingArgs : computeBrowserLoggingArgs;
-
-/**
- * @param {Array<string|Symbol|Object|number>} args
- */
-const print = (...args) => {
-  console.log(...computeLoggingArgs(args));
-  /* istanbul ignore next */
-  vconsoles.forEach(vc => vc.print(args));
-};
-
-/* istanbul ignore next */
-/**
- * @param {Error} err
- */
-const printError = err => {
-  console.error(err);
-  vconsoles.forEach(vc => vc.printError(err));
-};
-
-/* istanbul ignore next */
-/**
- * @param {string} url image location
- * @param {number} height height of the image in pixel
- */
-const printImg = (url, height) => {
-  if (isBrowser) {
-    console.log('%c                      ', `font-size: ${height}px; background-size: contain; background-repeat: no-repeat; background-image: url(${url})`);
-    // console.log('%c                ', `font-size: ${height}x; background: url(${url}) no-repeat;`)
-  }
-  vconsoles.forEach(vc => vc.printImg(url, height));
-};
-
-/* istanbul ignore next */
-/**
- * @param {string} base64
- * @param {number} height
- */
-const printImgBase64 = (base64, height) => printImg(`data:image/gif;base64,${base64}`, height);
-
-/**
- * @param {Array<string|Symbol|Object|number>} args
- */
-const group = (...args) => {
-  console.group(...computeLoggingArgs(args));
-  /* istanbul ignore next */
-  vconsoles.forEach(vc => vc.group(args));
-};
-
-/**
- * @param {Array<string|Symbol|Object|number>} args
- */
-const groupCollapsed = (...args) => {
-  console.groupCollapsed(...computeLoggingArgs(args));
-  /* istanbul ignore next */
-  vconsoles.forEach(vc => vc.groupCollapsed(args));
-};
-
-const groupEnd = () => {
-  console.groupEnd();
-  /* istanbul ignore next */
-  vconsoles.forEach(vc => vc.groupEnd());
-};
-
-const vconsoles = new Set();
-
-/* istanbul ignore next */
-/**
- * @param {Array<string|Symbol|Object|number>} args
- * @return {Array<Element>}
- */
-const _computeLineSpans = args => {
-  const spans = [];
-  const currentStyle = new Map();
-  // try with formatting until we find something unsupported
-  let i = 0;
-  for (; i < args.length; i++) {
-    const arg = args[i];
-    // @ts-ignore
-    const style = _browserStyleMap[arg];
-    if (style !== undefined) {
-      currentStyle.set(style.left, style.right);
-    } else {
-      if (arg.constructor === String || arg.constructor === Number) {
-        // @ts-ignore
-        const span = element('span', [create$4('style', mapToStyleString(currentStyle))], [text(arg)]);
-        if (span.innerHTML === '') {
-          span.innerHTML = '&nbsp;';
-        }
-        spans.push(span);
-      } else {
-        break
-      }
-    }
-  }
-  // append the rest
-  for (; i < args.length; i++) {
-    let content = args[i];
-    if (!(content instanceof Symbol)) {
-      if (content.constructor !== String && content.constructor !== Number) {
-        content = ' ' + stringify(content) + ' ';
-      }
-      spans.push(element('span', [], [text(/** @type {string} */ (content))]));
-    }
-  }
-  return spans
-};
-
-const lineStyle = 'font-family:monospace;border-bottom:1px solid #e2e2e2;padding:2px;';
-
-/* istanbul ignore next */
-class VConsole {
-  /**
-   * @param {Element} dom
-   */
-  constructor (dom) {
-    this.dom = dom;
-    /**
-     * @type {Element}
-     */
-    this.ccontainer = this.dom;
-    this.depth = 0;
-    vconsoles.add(this);
-  }
-
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @param {boolean} collapsed
-   */
-  group (args, collapsed = false) {
-    enqueue(() => {
-      const triangleDown = element('span', [create$4('hidden', collapsed), create$4('style', 'color:grey;font-size:120%;')], [text('▼')]);
-      const triangleRight = element('span', [create$4('hidden', !collapsed), create$4('style', 'color:grey;font-size:125%;')], [text('▶')]);
-      const content = element('div', [create$4('style', `${lineStyle};padding-left:${this.depth * 10}px`)], [triangleDown, triangleRight, text(' ')].concat(_computeLineSpans(args)));
-      const nextContainer = element('div', [create$4('hidden', collapsed)]);
-      const nextLine = element('div', [], [content, nextContainer]);
-      append(this.ccontainer, [nextLine]);
-      this.ccontainer = nextContainer;
-      this.depth++;
-      // when header is clicked, collapse/uncollapse container
-      addEventListener(content, 'click', event => {
-        nextContainer.toggleAttribute('hidden');
-        triangleDown.toggleAttribute('hidden');
-        triangleRight.toggleAttribute('hidden');
-      });
-    });
-  }
-
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   */
-  groupCollapsed (args) {
-    this.group(args, true);
-  }
-
-  groupEnd () {
-    enqueue(() => {
-      if (this.depth > 0) {
-        this.depth--;
-        // @ts-ignore
-        this.ccontainer = this.ccontainer.parentElement.parentElement;
-      }
-    });
-  }
-
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   */
-  print (args) {
-    enqueue(() => {
-      append(this.ccontainer, [element('div', [create$4('style', `${lineStyle};padding-left:${this.depth * 10}px`)], _computeLineSpans(args))]);
-    });
-  }
-
-  /**
-   * @param {Error} err
-   */
-  printError (err) {
-    this.print([RED, BOLD, err.toString()]);
-  }
-
-  /**
-   * @param {string} url
-   * @param {number} height
-   */
-  printImg (url, height) {
-    enqueue(() => {
-      append(this.ccontainer, [element('img', [create$4('src', url), create$4('height', `${round(height * 1.5)}px`)])]);
-    });
-  }
-
-  /**
-   * @param {Node} node
-   */
-  printDom (node) {
-    enqueue(() => {
-      append(this.ccontainer, [node]);
-    });
-  }
-
-  destroy () {
-    enqueue(() => {
-      vconsoles.delete(this);
-    });
-  }
-}
-
-/* istanbul ignore next */
-/**
- * @param {Element} dom
- */
-const createVConsole = dom => new VConsole(dom);
-
-/**
  * A transaction is created for every change on the Yjs model. It is possible
  * to bundle changes on the Yjs model in a single transaction to
  * minimize the number on messages sent and the number of observer calls.
@@ -3891,17 +6127,18 @@ class Transaction {
 }
 
 /**
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Transaction} transaction
+ * @return {boolean} Whether data was written.
  */
-const computeUpdateMessageFromTransaction = transaction => {
+const writeUpdateMessageFromTransaction = (encoder, transaction) => {
   if (transaction.deleteSet.clients.size === 0 && !any(transaction.afterState, (clock, client) => transaction.beforeState.get(client) !== clock)) {
-    return null
+    return false
   }
-  const encoder = createEncoder();
   sortAndMergeDeleteSet(transaction.deleteSet);
   writeStructsFromTransaction(encoder, transaction);
   writeDeleteSet(encoder, transaction.deleteSet);
-  return encoder
+  return true
 };
 
 /**
@@ -3926,7 +6163,7 @@ const nextID = transaction => {
 const addChangedTypeToTransaction = (transaction, type, parentSub) => {
   const item = type._item;
   if (item === null || (item.id.clock < (transaction.beforeState.get(item.id.client) || 0) && !item.deleted)) {
-    setIfUndefined(transaction.changed, type, create$1).add(parentSub);
+    setIfUndefined(transaction.changed, type, create$4).add(parentSub);
   }
 };
 
@@ -3953,7 +6190,7 @@ const tryToMergeWithLeft = (structs, pos) => {
  * @param {function(Item):boolean} gcFilter
  */
 const tryGcDeleteSet = (ds, store, gcFilter) => {
-  for (const [client, deleteItems] of ds.clients) {
+  for (const [client, deleteItems] of ds.clients.entries()) {
     const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di];
@@ -3982,7 +6219,7 @@ const tryGcDeleteSet = (ds, store, gcFilter) => {
 const tryMergeDeleteSet = (ds, store) => {
   // try to merge deleted / gc'd items
   // merge from right to left for better efficiecy and so we don't miss any merge targets
-  for (const [client, deleteItems] of ds.clients) {
+  ds.clients.forEach((deleteItems, client) => {
     const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di];
@@ -3996,7 +6233,7 @@ const tryMergeDeleteSet = (ds, store) => {
         tryToMergeWithLeft(structs, si);
       }
     }
-  }
+  });
 };
 
 /**
@@ -4074,7 +6311,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
       tryMergeDeleteSet(ds, store);
 
       // on all affected store.clients props, try to merge
-      for (const [client, clock] of transaction.afterState) {
+      transaction.afterState.forEach((clock, client) => {
         const beforeClock = transaction.beforeState.get(client) || 0;
         if (beforeClock !== clock) {
           const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
@@ -4084,7 +6321,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
             tryToMergeWithLeft(structs, i);
           }
         }
-      }
+      });
       // try to merge mergeStructs
       // @todo: it makes more sense to transform mergeStructs to a DS, sort it, and merge from right to left
       //        but at the moment DS does not handle duplicates
@@ -4106,9 +6343,17 @@ const cleanupTransactions = (transactionCleanups, i) => {
       // @todo Merge all the transactions into one and provide send the data as a single update message
       doc.emit('afterTransactionCleanup', [transaction, doc]);
       if (doc._observers.has('update')) {
-        const updateMessage = computeUpdateMessageFromTransaction(transaction);
-        if (updateMessage !== null) {
-          doc.emit('update', [toUint8Array(updateMessage), transaction.origin, doc]);
+        const encoder = new DefaultUpdateEncoder();
+        const hasContent = writeUpdateMessageFromTransaction(encoder, transaction);
+        if (hasContent) {
+          doc.emit('update', [encoder.toUint8Array(), transaction.origin, doc]);
+        }
+      }
+      if (doc._observers.has('updateV2')) {
+        const encoder = new UpdateEncoderV2();
+        const hasContent = writeUpdateMessageFromTransaction(encoder, transaction);
+        if (hasContent) {
+          doc.emit('updateV2', [encoder.toUint8Array(), transaction.origin, doc]);
         }
       }
       if (transactionCleanups.length <= i + 1) {
@@ -4508,8 +6753,8 @@ class YEvent {
     let changes = this._changes;
     if (changes === null) {
       const target = this.target;
-      const added = create$1();
-      const deleted = create$1();
+      const added = create$4();
+      const deleted = create$4();
       /**
        * @type {Array<{insert:Array<any>}|{delete:number}|{retain:number}>}
        */
@@ -4694,6 +6939,196 @@ const iteratorMap = (iterator, fmap) => createIterator(() => {
   return { done, value: done ? undefined : fmap(value) }
 });
 
+const maxSearchMarker = 80;
+
+/**
+ * A unique timestamp that identifies each marker.
+ *
+ * Time is relative,.. this is more like an ever-increasing clock.
+ *
+ * @type {number}
+ */
+let globalSearchMarkerTimestamp = 0;
+
+class ArraySearchMarker {
+  /**
+   * @param {Item} p
+   * @param {number} index
+   */
+  constructor (p, index) {
+    p.marker = true;
+    this.p = p;
+    this.index = index;
+    this.timestamp = globalSearchMarkerTimestamp++;
+  }
+}
+
+/**
+ * @param {ArraySearchMarker} marker
+ */
+const refreshMarkerTimestamp = marker => { marker.timestamp = globalSearchMarkerTimestamp++; };
+
+/**
+ * This is rather complex so this function is the only thing that should overwrite a marker
+ *
+ * @param {ArraySearchMarker} marker
+ * @param {Item} p
+ * @param {number} index
+ */
+const overwriteMarker = (marker, p, index) => {
+  marker.p.marker = false;
+  marker.p = p;
+  p.marker = true;
+  marker.index = index;
+  marker.timestamp = globalSearchMarkerTimestamp++;
+};
+
+/**
+ * @param {Array<ArraySearchMarker>} searchMarker
+ * @param {Item} p
+ * @param {number} index
+ */
+const markPosition = (searchMarker, p, index) => {
+  if (searchMarker.length >= maxSearchMarker) {
+    // override oldest marker (we don't want to create more objects)
+    const marker = searchMarker.reduce((a, b) => a.timestamp < b.timestamp ? a : b);
+    overwriteMarker(marker, p, index);
+    return marker
+  } else {
+    // create new marker
+    const pm = new ArraySearchMarker(p, index);
+    searchMarker.push(pm);
+    return pm
+  }
+};
+
+/**
+ * Search marker help us to find positions in the associative array faster.
+ *
+ * They speed up the process of finding a position without much bookkeeping.
+ *
+ * A maximum of `maxSearchMarker` objects are created.
+ *
+ * This function always returns a refreshed marker (updated timestamp)
+ *
+ * @param {AbstractType<any>} yarray
+ * @param {number} index
+ */
+const findMarker = (yarray, index) => {
+  if (yarray._start === null || index === 0 || yarray._searchMarker === null) {
+    return null
+  }
+  const marker = yarray._searchMarker.length === 0 ? null : yarray._searchMarker.reduce((a, b) => abs(index - a.index) < abs(index - b.index) ? a : b);
+  let p = yarray._start;
+  let pindex = 0;
+  if (marker !== null) {
+    p = marker.p;
+    pindex = marker.index;
+    refreshMarkerTimestamp(marker); // we used it, we might need to use it again
+  }
+  // iterate to right if possible
+  while (p.right !== null && pindex < index) {
+    if (!p.deleted && p.countable) {
+      if (index < pindex + p.length) {
+        break
+      }
+      pindex += p.length;
+    }
+    p = p.right;
+  }
+  // iterate to left if necessary (might be that pindex > index)
+  while (p.left !== null && pindex > index) {
+    p = p.left;
+    if (!p.deleted && p.countable) {
+      pindex -= p.length;
+    }
+  }
+  // we want to make sure that p can't be merged with left, because that would screw up everything
+  // in that cas just return what we have (it is most likely the best marker anyway)
+  // iterate to left until p can't be merged with left
+  while (p.left !== null && p.left.id.client === p.id.client && p.left.id.clock + p.left.length === p.id.clock) {
+    p = p.left;
+    if (!p.deleted && p.countable) {
+      pindex -= p.length;
+    }
+  }
+
+  // @todo remove!
+  // assure position
+  // {
+  //   let start = yarray._start
+  //   let pos = 0
+  //   while (start !== p) {
+  //     if (!start.deleted && start.countable) {
+  //       pos += start.length
+  //     }
+  //     start = /** @type {Item} */ (start.right)
+  //   }
+  //   if (pos !== pindex) {
+  //     debugger
+  //     throw new Error('Gotcha position fail!')
+  //   }
+  // }
+  // if (marker) {
+  //   if (window.lengthes == null) {
+  //     window.lengthes = []
+  //     window.getLengthes = () => window.lengthes.sort((a, b) => a - b)
+  //   }
+  //   window.lengthes.push(marker.index - pindex)
+  //   console.log('distance', marker.index - pindex, 'len', p && p.parent.length)
+  // }
+  if (marker !== null && abs(marker.index - pindex) < p.parent.length / maxSearchMarker) {
+    // adjust existing marker
+    overwriteMarker(marker, p, pindex);
+    return marker
+  } else {
+    // create new marker
+    return markPosition(yarray._searchMarker, p, pindex)
+  }
+};
+
+/**
+ * Update markers when a change happened.
+ *
+ * This should be called before doing a deletion!
+ *
+ * @param {Array<ArraySearchMarker>} searchMarker
+ * @param {number} index
+ * @param {number} len If insertion, len is positive. If deletion, len is negative.
+ */
+const updateMarkerChanges = (searchMarker, index, len) => {
+  for (let i = searchMarker.length - 1; i >= 0; i--) {
+    const m = searchMarker[i];
+    if (len > 0) {
+      /**
+       * @type {Item|null}
+       */
+      let p = m.p;
+      p.marker = false;
+      // Ideally we just want to do a simple position comparison, but this will only work if
+      // search markers don't point to deleted items for formats.
+      // Iterate marker to prev undeleted countable position so we know what to do when updating a position
+      while (p && (p.deleted || !p.countable)) {
+        p = p.left;
+        if (p && !p.deleted && p.countable) {
+          // adjust position. the loop should break now
+          m.index -= p.length;
+        }
+      }
+      if (p === null || p.marker === true) {
+        // remove search marker if updated position is null or if position is already marked
+        searchMarker.splice(i, 1);
+        continue
+      }
+      m.p = p;
+      p.marker = true;
+    }
+    if (index < m.index || (len > 0 && index === m.index)) { // a simple index <= m.index check would actually suffice
+      m.index = max(index, m.index + len);
+    }
+  }
+};
+
 /**
  * Accumulate all (list) children of a type and return them as an Array.
  *
@@ -4766,6 +7201,10 @@ class AbstractType {
      * @type {EventHandler<Array<YEvent>,Transaction>}
      */
     this._dEH = createEventHandler();
+    /**
+     * @type {null | Array<ArraySearchMarker>}
+     */
+    this._searchMarker = null;
   }
 
   /**
@@ -4791,7 +7230,7 @@ class AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) { }
 
@@ -4813,7 +7252,11 @@ class AbstractType {
    * @param {Transaction} transaction
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
    */
-  _callObserver (transaction, parentSubs) { /* skip if no type is specified */ }
+  _callObserver (transaction, parentSubs) {
+    if (!transaction.local && this._searchMarker) {
+      this._searchMarker.length = 0;
+    }
+  }
 
   /**
    * Observe all events that are created on this type.
@@ -5029,7 +7472,13 @@ const typeListForEachSnapshot = (type, f, snapshot) => {
  * @function
  */
 const typeListGet = (type, index) => {
-  for (let n = type._start; n !== null; n = n.right) {
+  const marker = findMarker(type, index);
+  let n = type._start;
+  if (marker !== null) {
+    n = marker.p;
+    index -= marker.index;
+  }
+  for (; n !== null; n = n.right) {
     if (!n.deleted && n.countable) {
       if (index < n.length) {
         return n.content.getContent()[index]
@@ -5106,9 +7555,24 @@ const typeListInsertGenericsAfter = (transaction, parent, referenceItem, content
  */
 const typeListInsertGenerics = (transaction, parent, index, content) => {
   if (index === 0) {
+    if (parent._searchMarker) {
+      updateMarkerChanges(parent._searchMarker, index, content.length);
+    }
     return typeListInsertGenericsAfter(transaction, parent, null, content)
   }
+  const startIndex = index;
+  const marker = findMarker(parent, index);
   let n = parent._start;
+  if (marker !== null) {
+    n = marker.p;
+    index -= marker.index;
+    // we need to iterate one to the left so that the algorithm works
+    if (index === 0) {
+      // @todo refactor this as it actually doesn't consider formats
+      n = n.prev; // important! get the left undeleted item so that we can actually decrease index
+      index += (n && n.countable && !n.deleted) ? n.length : 0;
+    }
+  }
   for (; n !== null; n = n.right) {
     if (!n.deleted && n.countable) {
       if (index <= n.length) {
@@ -5120,6 +7584,9 @@ const typeListInsertGenerics = (transaction, parent, index, content) => {
       }
       index -= n.length;
     }
+  }
+  if (parent._searchMarker) {
+    updateMarkerChanges(parent._searchMarker, startIndex, content.length);
   }
   return typeListInsertGenericsAfter(transaction, parent, n, content)
 };
@@ -5135,7 +7602,14 @@ const typeListInsertGenerics = (transaction, parent, index, content) => {
  */
 const typeListDelete = (transaction, parent, index, length) => {
   if (length === 0) { return }
+  const startIndex = index;
+  const startLength = length;
+  const marker = findMarker(parent, index);
   let n = parent._start;
+  if (marker !== null) {
+    n = marker.p;
+    index -= marker.index;
+  }
   // compute the first item to be deleted
   for (; n !== null && index > 0; n = n.right) {
     if (!n.deleted && n.countable) {
@@ -5157,7 +7631,10 @@ const typeListDelete = (transaction, parent, index, length) => {
     n = n.right;
   }
   if (length > 0) {
-    throw create$2('array length exceeded')
+    throw create$5('array length exceeded')
+  }
+  if (parent._searchMarker) {
+    updateMarkerChanges(parent._searchMarker, startIndex, -startLength + length /* in case we remove the above exception */);
   }
 };
 
@@ -5240,11 +7717,11 @@ const typeMapGetAll = (parent) => {
    * @type {Object<string,any>}
    */
   const res = {};
-  for (const [key, value] of parent._map) {
+  parent._map.forEach((value, key) => {
     if (!value.deleted) {
       res[key] = value.content.getContent()[value.length - 1];
     }
-  }
+  });
   return res
 };
 
@@ -5320,6 +7797,10 @@ class YArray extends AbstractType {
      * @private
      */
     this._prelimContent = [];
+    /**
+     * @type {Array<ArraySearchMarker>}
+     */
+    this._searchMarker = [];
   }
 
   /**
@@ -5353,6 +7834,7 @@ class YArray extends AbstractType {
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
    */
   _callObserver (transaction, parentSubs) {
+    super._callObserver(transaction, parentSubs);
     callTypeObservers(this, transaction, new YArrayEvent(this, transaction));
   }
 
@@ -5474,15 +7956,15 @@ class YArray extends AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    writeVarUint(encoder, YArrayRefID);
+    encoder.writeTypeRef(YArrayRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  *
  * @private
  * @function
@@ -5543,10 +8025,10 @@ class YMap extends AbstractType {
    * @param {Item} item
    */
   _integrate (y, item) {
-    super._integrate(y, item);
-    for (const [key, value] of /** @type {Map<string, any>} */ (this._prelimContent)) {
+    super._integrate(y, item)
+    ;/** @type {Map<string, any>} */ (this._prelimContent).forEach((value, key) => {
       this.set(key, value);
-    }
+    });
     this._prelimContent = null;
   }
 
@@ -5574,12 +8056,12 @@ class YMap extends AbstractType {
      * @type {Object<string,T>}
      */
     const map = {};
-    for (const [key, item] of this._map) {
+    this._map.forEach((item, key) => {
       if (!item.deleted) {
         const v = item.content.getContent()[item.length - 1];
         map[key] = v instanceof AbstractType ? v.toJSON() : v;
       }
-    }
+    });
     return map
   }
 
@@ -5629,11 +8111,11 @@ class YMap extends AbstractType {
      * @type {Object<string,T>}
      */
     const map = {};
-    for (const [key, item] of this._map) {
+    this._map.forEach((item, key) => {
       if (!item.deleted) {
         f(item.content.getContent()[item.length - 1], key, this);
       }
-    }
+    });
     return map
   }
 
@@ -5697,15 +8179,15 @@ class YMap extends AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    writeVarUint(encoder, YMapRefID);
+    encoder.writeTypeRef(YMapRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  *
  * @private
  * @function
@@ -5719,75 +8201,79 @@ const readYMap = decoder => new YMap();
  */
 const equalAttrs = (a, b) => a === b || (typeof a === 'object' && typeof b === 'object' && a && b && equalFlat(a, b));
 
-class ItemListPosition {
+class ItemTextListPosition {
   /**
    * @param {Item|null} left
    * @param {Item|null} right
-   */
-  constructor (left, right) {
-    this.left = left;
-    this.right = right;
-  }
-}
-
-class ItemTextListPosition extends ItemListPosition {
-  /**
-   * @param {Item|null} left
-   * @param {Item|null} right
+   * @param {number} index
    * @param {Map<string,any>} currentAttributes
    */
-  constructor (left, right, currentAttributes) {
-    super(left, right);
+  constructor (left, right, index, currentAttributes) {
+    this.left = left;
+    this.right = right;
+    this.index = index;
     this.currentAttributes = currentAttributes;
   }
-}
 
-class ItemInsertionResult extends ItemListPosition {
   /**
-   * @param {Item|null} left
-   * @param {Item|null} right
-   * @param {Map<string,any>} negatedAttributes
+   * Only call this if you know that this.right is defined
    */
-  constructor (left, right, negatedAttributes) {
-    super(left, right);
-    this.negatedAttributes = negatedAttributes;
+  forward () {
+    if (this.right === null) {
+      unexpectedCase();
+    }
+    switch (this.right.content.constructor) {
+      case ContentEmbed:
+      case ContentString:
+        if (!this.right.deleted) {
+          this.index += this.right.length;
+        }
+        break
+      case ContentFormat:
+        if (!this.right.deleted) {
+          updateCurrentAttributes(this.currentAttributes, /** @type {ContentFormat} */ (this.right.content));
+        }
+        break
+    }
+    this.left = this.right;
+    this.right = this.right.right;
   }
 }
 
 /**
  * @param {Transaction} transaction
- * @param {Map<string,any>} currentAttributes
- * @param {Item|null} left
- * @param {Item|null} right
- * @param {number} count
+ * @param {ItemTextListPosition} pos
+ * @param {number} count steps to move forward
  * @return {ItemTextListPosition}
  *
  * @private
  * @function
  */
-const findNextPosition = (transaction, currentAttributes, left, right, count) => {
-  while (right !== null && count > 0) {
-    switch (right.content.constructor) {
+const findNextPosition = (transaction, pos, count) => {
+  while (pos.right !== null && count > 0) {
+    switch (pos.right.content.constructor) {
       case ContentEmbed:
       case ContentString:
-        if (!right.deleted) {
-          if (count < right.length) {
+        if (!pos.right.deleted) {
+          if (count < pos.right.length) {
             // split right
-            getItemCleanStart(transaction, createID(right.id.client, right.id.clock + count));
+            getItemCleanStart(transaction, createID(pos.right.id.client, pos.right.id.clock + count));
           }
-          count -= right.length;
+          pos.index += pos.right.length;
+          count -= pos.right.length;
         }
         break
       case ContentFormat:
-        if (!right.deleted) {
-          updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (right.content));
+        if (!pos.right.deleted) {
+          updateCurrentAttributes(pos.currentAttributes, /** @type {ContentFormat} */ (pos.right.content));
         }
         break
     }
-    left = right;
-    right = right.right;
+    pos.left = pos.right;
+    pos.right = pos.right.right;
+    // pos.forward() - we don't forward because that would halve the performance because we already do the checks above
   }
-  return new ItemTextListPosition(left, right, currentAttributes)
+  return pos
 };
 
 /**
@@ -5801,8 +8287,14 @@ const findNextPosition = (transaction, currentAttributes, left, right, count) =>
  */
 const findPosition = (transaction, parent, index) => {
   const currentAttributes = new Map();
-  const right = parent._start;
-  return findNextPosition(transaction, currentAttributes, null, right, index)
+  const marker = findMarker(parent, index);
+  if (marker) {
+    const pos = new ItemTextListPosition(marker.p.left, marker.p, marker.index, currentAttributes);
+    return findNextPosition(transaction, pos, index - marker.index)
+  } else {
+    const pos = new ItemTextListPosition(null, parent._start, 0, currentAttributes);
+    return findNextPosition(transaction, pos, index)
+  }
 };
 
 /**
@@ -5810,37 +8302,35 @@ const findPosition = (transaction, parent, index) => {
  *
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {ItemListPosition} currPos
+ * @param {ItemTextListPosition} currPos
  * @param {Map<string,any>} negatedAttributes
  *
  * @private
  * @function
  */
 const insertNegatedAttributes = (transaction, parent, currPos, negatedAttributes) => {
-  let { left, right } = currPos;
   // check if we really need to remove attributes
   while (
-    right !== null && (
-      right.deleted === true || (
-        right.content.constructor === ContentFormat &&
-        equalAttrs(negatedAttributes.get(/** @type {ContentFormat} */ (right.content).key), /** @type {ContentFormat} */ (right.content).value)
+    currPos.right !== null && (
+      currPos.right.deleted === true || (
+        currPos.right.content.constructor === ContentFormat &&
+        equalAttrs(negatedAttributes.get(/** @type {ContentFormat} */ (currPos.right.content).key), /** @type {ContentFormat} */ (currPos.right.content).value)
       )
     )
   ) {
-    if (!right.deleted) {
-      negatedAttributes.delete(/** @type {ContentFormat} */ (right.content).key);
+    if (!currPos.right.deleted) {
+      negatedAttributes.delete(/** @type {ContentFormat} */ (currPos.right.content).key);
     }
-    left = right;
-    right = right.right;
+    currPos.forward();
   }
   const doc = transaction.doc;
   const ownClientId = doc.clientID;
-  for (const [key, val] of negatedAttributes) {
+  let left = currPos.left;
+  const right = currPos.right;
+  negatedAttributes.forEach((val, key) => {
     left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
     left.integrate(transaction, 0);
-  }
-  currPos.left = left;
-  currPos.right = right;
+  });
 };
 
 /**
@@ -5860,57 +8350,49 @@ const updateCurrentAttributes = (currentAttributes, format) => {
 };
 
 /**
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {Object<string,any>} attributes
  *
  * @private
  * @function
  */
-const minimizeAttributeChanges = (currPos, currentAttributes, attributes) => {
+const minimizeAttributeChanges = (currPos, attributes) => {
   // go right while attributes[right.key] === right.value (or right is deleted)
-  let { left, right } = currPos;
   while (true) {
-    if (right === null) {
+    if (currPos.right === null) {
       break
-    } else if (right.deleted) ; else if (right.content.constructor === ContentFormat && equalAttrs(attributes[(/** @type {ContentFormat} */ (right.content)).key] || null, /** @type {ContentFormat} */ (right.content).value)) {
-      // found a format, update currentAttributes and continue
-      updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (right.content));
-    } else {
+    } else if (currPos.right.deleted || (currPos.right.content.constructor === ContentFormat && equalAttrs(attributes[(/** @type {ContentFormat} */ (currPos.right.content)).key] || null, /** @type {ContentFormat} */ (currPos.right.content).value))) ; else {
       break
     }
-    left = right;
-    right = right.right;
+    currPos.forward();
   }
-  currPos.left = left;
-  currPos.right = right;
 };
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {Object<string,any>} attributes
  * @return {Map<string,any>}
  *
  * @private
  * @function
  **/
-const insertAttributes = (transaction, parent, currPos, currentAttributes, attributes) => {
+const insertAttributes = (transaction, parent, currPos, attributes) => {
   const doc = transaction.doc;
   const ownClientId = doc.clientID;
   const negatedAttributes = new Map();
   // insert format-start items
   for (const key in attributes) {
     const val = attributes[key];
-    const currentVal = currentAttributes.get(key) || null;
+    const currentVal = currPos.currentAttributes.get(key) || null;
     if (!equalAttrs(currentVal, val)) {
       // save negated attribute (set null if currentVal undefined)
       negatedAttributes.set(key, currentVal);
       const { left, right } = currPos;
-      currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
-      currPos.left.integrate(transaction, 0);
+      currPos.right = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentFormat(key, val));
+      currPos.right.integrate(transaction, 0);
+      currPos.forward();
     }
   }
   return negatedAttributes
@@ -5919,56 +8401,59 @@ const insertAttributes = (transaction, parent, currPos, currentAttributes, attri
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {string|object} text
  * @param {Object<string,any>} attributes
  *
  * @private
  * @function
  **/
-const insertText = (transaction, parent, currPos, currentAttributes, text, attributes) => {
-  for (const [key] of currentAttributes) {
+const insertText = (transaction, parent, currPos, text, attributes) => {
+  currPos.currentAttributes.forEach((val, key) => {
     if (attributes[key] === undefined) {
       attributes[key] = null;
     }
-  }
+  });
   const doc = transaction.doc;
   const ownClientId = doc.clientID;
-  minimizeAttributeChanges(currPos, currentAttributes, attributes);
-  const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes);
+  minimizeAttributeChanges(currPos, attributes);
+  const negatedAttributes = insertAttributes(transaction, parent, currPos, attributes);
   // insert content
   const content = text.constructor === String ? new ContentString(/** @type {string} */ (text)) : new ContentEmbed(text);
-  const { left, right } = currPos;
-  currPos.left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, content);
-  currPos.left.integrate(transaction, 0);
-  return insertNegatedAttributes(transaction, parent, currPos, negatedAttributes)
+  let { left, right, index } = currPos;
+  if (parent._searchMarker) {
+    updateMarkerChanges(parent._searchMarker, currPos.index, content.getLength());
+  }
+  right = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, content);
+  right.integrate(transaction, 0);
+  currPos.right = right;
+  currPos.index = index;
+  currPos.forward();
+  insertNegatedAttributes(transaction, parent, currPos, negatedAttributes);
 };
 
 /**
  * @param {Transaction} transaction
  * @param {AbstractType<any>} parent
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {number} length
  * @param {Object<string,any>} attributes
  *
  * @private
  * @function
  */
-const formatText = (transaction, parent, currPos, currentAttributes, length, attributes) => {
+const formatText = (transaction, parent, currPos, length, attributes) => {
   const doc = transaction.doc;
   const ownClientId = doc.clientID;
-  minimizeAttributeChanges(currPos, currentAttributes, attributes);
-  const negatedAttributes = insertAttributes(transaction, parent, currPos, currentAttributes, attributes);
-  let { left, right } = currPos;
+  minimizeAttributeChanges(currPos, attributes);
+  const negatedAttributes = insertAttributes(transaction, parent, currPos, attributes);
   // iterate until first non-format or null is found
   // delete all formats with attributes[format.key] != null
-  while (length > 0 && right !== null) {
-    if (!right.deleted) {
-      switch (right.content.constructor) {
+  while (length > 0 && currPos.right !== null) {
+    if (!currPos.right.deleted) {
+      switch (currPos.right.content.constructor) {
         case ContentFormat: {
-          const { key, value } = /** @type {ContentFormat} */ (right.content);
+          const { key, value } = /** @type {ContentFormat} */ (currPos.right.content);
           const attr = attributes[key];
           if (attr !== undefined) {
             if (equalAttrs(attr, value)) {
@@ -5976,22 +8461,20 @@ const formatText = (transaction, parent, currPos, currentAttributes, length, att
             } else {
               negatedAttributes.set(key, value);
             }
-            right.delete(transaction);
+            currPos.right.delete(transaction);
           }
-          updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (right.content));
           break
         }
         case ContentEmbed:
         case ContentString:
-          if (length < right.length) {
-            getItemCleanStart(transaction, createID(right.id.client, right.id.clock + length));
+          if (length < currPos.right.length) {
+            getItemCleanStart(transaction, createID(currPos.right.id.client, currPos.right.id.clock + length));
           }
-          length -= right.length;
+          length -= currPos.right.length;
           break
       }
     }
-    left = right;
-    right = right.right;
+    currPos.forward();
   }
   // Quill just assumes that the editor starts with a newline and that it always
   // ends with a newline. We only insert that newline when a new newline is
@@ -6001,11 +8484,10 @@ const formatText = (transaction, parent, currPos, currentAttributes, length, att
     for (; length > 0; length--) {
       newlines += '\n';
     }
-    left = new Item(createID(ownClientId, getState(doc.store, ownClientId)), left, left && left.lastId, right, right && right.id, parent, null, new ContentString(newlines));
-    left.integrate(transaction, 0);
+    currPos.right = new Item(createID(ownClientId, getState(doc.store, ownClientId)), currPos.left, currPos.left && currPos.left.lastId, currPos.right, currPos.right && currPos.right.id, parent, null, new ContentString(newlines));
+    currPos.right.integrate(transaction, 0);
+    currPos.forward();
   }
-  currPos.left = left;
-  currPos.right = right;
   insertNegatedAttributes(transaction, parent, currPos, negatedAttributes);
 };
 
@@ -6115,42 +8597,39 @@ const cleanupYTextFormatting = type => {
 
 /**
  * @param {Transaction} transaction
- * @param {ItemListPosition} currPos
- * @param {Map<string,any>} currentAttributes
+ * @param {ItemTextListPosition} currPos
  * @param {number} length
- * @return {ItemListPosition}
+ * @return {ItemTextListPosition}
  *
  * @private
  * @function
  */
-const deleteText = (transaction, currPos, currentAttributes, length) => {
-  const startAttrs = copy(currentAttributes);
+const deleteText = (transaction, currPos, length) => {
+  const startLength = length;
+  const startAttrs = copy(currPos.currentAttributes);
   const start = currPos.right;
-  let { left, right } = currPos;
-  while (length > 0 && right !== null) {
-    if (right.deleted === false) {
-      switch (right.content.constructor) {
-        case ContentFormat:
-          updateCurrentAttributes(currentAttributes, /** @type {ContentFormat} */ (right.content));
-          break
+  while (length > 0 && currPos.right !== null) {
+    if (currPos.right.deleted === false) {
+      switch (currPos.right.content.constructor) {
         case ContentEmbed:
         case ContentString:
-          if (length < right.length) {
-            getItemCleanStart(transaction, createID(right.id.client, right.id.clock + length));
+          if (length < currPos.right.length) {
+            getItemCleanStart(transaction, createID(currPos.right.id.client, currPos.right.id.clock + length));
           }
-          length -= right.length;
-          right.delete(transaction);
+          length -= currPos.right.length;
+          currPos.right.delete(transaction);
           break
       }
     }
-    left = right;
-    right = right.right;
+    currPos.forward();
   }
   if (start) {
-    cleanupFormattingGap(transaction, start, right, startAttrs, copy(currentAttributes));
+    cleanupFormattingGap(transaction, start, currPos.right, startAttrs, copy(currPos.currentAttributes));
   }
-  currPos.left = left;
-  currPos.right = right;
+  const parent = /** @type {AbstractType<any>} */ (/** @type {Item} */ (currPos.left || currPos.right).parent);
+  if (parent._searchMarker) {
+    updateMarkerChanges(parent._searchMarker, currPos.index, -startLength + length);
+  }
   return currPos
 };
 
@@ -6251,11 +8730,11 @@ class YTextEvent extends YEvent {
                 op = { insert };
                 if (currentAttributes.size > 0) {
                   op.attributes = {};
-                  for (const [key, value] of currentAttributes) {
+                  currentAttributes.forEach((value, key) => {
                     if (value !== null) {
                       op.attributes[key] = value;
                     }
-                  }
+                  });
                 }
                 insert = '';
                 break
@@ -6413,6 +8892,10 @@ class YText extends AbstractType {
      * @type {Array<function():void>?}
      */
     this._pending = string !== undefined ? [() => this.insert(0, string)] : [];
+    /**
+     * @type {Array<ArraySearchMarker>}
+     */
+    this._searchMarker = [];
   }
 
   /**
@@ -6449,20 +8932,21 @@ class YText extends AbstractType {
    * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
    */
   _callObserver (transaction, parentSubs) {
+    super._callObserver(transaction, parentSubs);
     const event = new YTextEvent(this, transaction);
     const doc = transaction.doc;
     // If a remote change happened, we try to cleanup potential formatting duplicates.
     if (!transaction.local) {
       // check if another formatting item was inserted
       let foundFormattingItem = false;
-      for (const [client, afterClock] of transaction.afterState) {
+      for (const [client, afterClock] of transaction.afterState.entries()) {
         const clock = transaction.beforeState.get(client) || 0;
         if (afterClock === clock) {
           continue
         }
         iterateStructs(transaction, /** @type {Array<Item|GC>} */ (doc.store.clients.get(client)), clock, afterClock, item => {
           // @ts-ignore
-          if (!item.deleted && item.content.constructor === ContentFormat) {
+          if (item.content.constructor === ContentFormat) {
             foundFormattingItem = true;
           }
         });
@@ -6470,7 +8954,17 @@ class YText extends AbstractType {
           break
         }
       }
-      transact(doc, t => {
+      if (!foundFormattingItem) {
+        iterateDeletedStructs(transaction, transaction.deleteSet, item => {
+          if (item instanceof GC || foundFormattingItem) {
+            return
+          }
+          if (item.parent === this && item.content.constructor === ContentFormat) {
+            foundFormattingItem = true;
+          }
+        });
+      }
+      transact(doc, (t) => {
         if (foundFormattingItem) {
           // If a formatting item was inserted, we simply clean the whole type.
           // We need to compute currentAttributes for the current position anyway.
@@ -6479,7 +8973,7 @@ class YText extends AbstractType {
           // If no formatting attribute was inserted, we can make due with contextless
           // formatting cleanups.
           // Contextless: it is not necessary to compute currentAttributes for the affected position.
-          iterateDeletedStructs(t, transaction.deleteSet, item => {
+          iterateDeletedStructs(t, t.deleteSet, item => {
             if (item instanceof GC) {
               return
             }
@@ -6536,11 +9030,7 @@ class YText extends AbstractType {
   applyDelta (delta, { sanitize = true } = {}) {
     if (this.doc !== null) {
       transact(this.doc, transaction => {
-        /**
-         * @type {ItemListPosition}
-         */
-        const currPos = new ItemListPosition(null, this._start);
-        const currentAttributes = new Map();
+        const currPos = new ItemTextListPosition(null, this._start, 0, new Map());
         for (let i = 0; i < delta.length; i++) {
           const op = delta[i];
           if (op.insert !== undefined) {
@@ -6551,12 +9041,12 @@ class YText extends AbstractType {
             // paragraphs, but nothing bad will happen.
             const ins = (!sanitize && typeof op.insert === 'string' && i === delta.length - 1 && currPos.right === null && op.insert.slice(-1) === '\n') ? op.insert.slice(0, -1) : op.insert;
             if (typeof ins !== 'string' || ins.length > 0) {
-              insertText(transaction, this, currPos, currentAttributes, ins, op.attributes || {});
+              insertText(transaction, this, currPos, ins, op.attributes || {});
             }
           } else if (op.retain !== undefined) {
-            formatText(transaction, this, currPos, currentAttributes, op.retain, op.attributes || {});
+            formatText(transaction, this, currPos, op.retain, op.attributes || {});
           } else if (op.delete !== undefined) {
-            deleteText(transaction, currPos, currentAttributes, op.delete);
+            deleteText(transaction, currPos, op.delete);
           }
         }
       });
@@ -6592,10 +9082,10 @@ class YText extends AbstractType {
          */
         const attributes = {};
         let addAttributes = false;
-        for (const [key, value] of currentAttributes) {
+        currentAttributes.forEach((value, key) => {
           addAttributes = true;
           attributes[key] = value;
-        }
+        });
         /**
          * @type {Object<string,any>}
          */
@@ -6649,9 +9139,9 @@ class YText extends AbstractType {
               if (currentAttributes.size > 0) {
                 const attrs = /** @type {Object<string,any>} */ ({});
                 op.attributes = attrs;
-                for (const [key, value] of currentAttributes) {
+                currentAttributes.forEach((value, key) => {
                   attrs[key] = value;
-                }
+                });
               }
               ops.push(op);
               break
@@ -6688,13 +9178,13 @@ class YText extends AbstractType {
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
-        const { left, right, currentAttributes } = findPosition(transaction, this, index);
+        const pos = findPosition(transaction, this, index);
         if (!attributes) {
           attributes = {};
           // @ts-ignore
-          currentAttributes.forEach((v, k) => { attributes[k] = v; });
+          pos.currentAttributes.forEach((v, k) => { attributes[k] = v; });
         }
-        insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, text, attributes);
+        insertText(transaction, this, pos, text, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.insert(index, text, attributes));
@@ -6718,8 +9208,8 @@ class YText extends AbstractType {
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
-        const { left, right, currentAttributes } = findPosition(transaction, this, index);
-        insertText(transaction, this, new ItemListPosition(left, right), currentAttributes, embed, attributes);
+        const pos = findPosition(transaction, this, index);
+        insertText(transaction, this, pos, embed, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.insertEmbed(index, embed, attributes));
@@ -6741,8 +9231,7 @@ class YText extends AbstractType {
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
-        const { left, right, currentAttributes } = findPosition(transaction, this, index);
-        deleteText(transaction, new ItemListPosition(left, right), currentAttributes, length);
+        deleteText(transaction, findPosition(transaction, this, index), length);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.delete(index, length));
@@ -6766,11 +9255,11 @@ class YText extends AbstractType {
     const y = this.doc;
     if (y !== null) {
       transact(y, transaction => {
-        const { left, right, currentAttributes } = findPosition(transaction, this, index);
-        if (right === null) {
+        const pos = findPosition(transaction, this, index);
+        if (pos.right === null) {
           return
         }
-        formatText(transaction, this, new ItemListPosition(left, right), currentAttributes, length, attributes);
+        formatText(transaction, this, pos, length, attributes);
       });
     } else {
       /** @type {Array<function>} */ (this._pending).push(() => this.format(index, length, attributes));
@@ -6778,15 +9267,15 @@ class YText extends AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    writeVarUint(encoder, YTextRefID);
+    encoder.writeTypeRef(YTextRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YText}
  *
  * @private
@@ -7103,15 +9592,15 @@ class YXmlFragment extends AbstractType {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    */
   _write (encoder) {
-    writeVarUint(encoder, YXmlFragmentRefID);
+    encoder.writeTypeRef(YXmlFragmentRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YXmlFragment}
  *
  * @private
@@ -7286,21 +9775,21 @@ class YXmlElement extends YXmlFragment {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    */
   _write (encoder) {
-    writeVarUint(encoder, YXmlElementRefID);
-    writeVarString(encoder, this.nodeName);
+    encoder.writeTypeRef(YXmlElementRefID);
+    encoder.writeKey(this.nodeName);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YXmlElement}
  *
  * @function
  */
-const readYXmlElement = decoder => new YXmlElement(readVarString(decoder));
+const readYXmlElement = decoder => new YXmlElement(decoder.readKey());
 
 /**
  * An Event that describes changes on a YXml Element or Yxml Fragment
@@ -7396,24 +9885,23 @@ class YXmlHook extends YMap {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    */
   _write (encoder) {
-    super._write(encoder);
-    writeVarUint(encoder, YXmlHookRefID);
-    writeVarString(encoder, this.hookName);
+    encoder.writeTypeRef(YXmlHookRefID);
+    encoder.writeKey(this.hookName);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YXmlHook}
  *
  * @private
  * @function
  */
 const readYXmlHook = decoder =>
-  new YXmlHook(readVarString(decoder));
+  new YXmlHook(decoder.readKey());
 
 /**
  * Represents text in a Dom Element. In the future this type will also handle
@@ -7489,15 +9977,15 @@ class YXmlText extends YText {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    writeVarUint(encoder, YXmlTextRefID);
+    encoder.writeTypeRef(YXmlTextRefID);
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {YXmlText}
  *
  * @private
@@ -7534,7 +10022,7 @@ class AbstractStruct {
   }
 
   /**
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    * @param {number} offset
    * @param {number} encodingRef
    */
@@ -7585,12 +10073,12 @@ class GC extends AbstractStruct {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    writeUint8(encoder, structGCRefNumber);
-    writeVarUint(encoder, this.length - offset);
+    encoder.writeInfo(structGCRefNumber);
+    encoder.writeLen(this.length - offset);
   }
 
   /**
@@ -7669,11 +10157,11 @@ class ContentBinary {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    writeVarUint8Array(encoder, this.content);
+    encoder.writeBuf(this.content);
   }
 
   /**
@@ -7685,10 +10173,10 @@ class ContentBinary {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentBinary}
  */
-const readContentBinary = decoder => new ContentBinary(copyUint8Array(readVarUint8Array(decoder)));
+const readContentBinary = decoder => new ContentBinary(decoder.readBuf());
 
 class ContentDeleted {
   /**
@@ -7750,7 +10238,7 @@ class ContentDeleted {
    * @param {Item} item
    */
   integrate (transaction, item) {
-    addToDeleteSet(transaction.deleteSet, item.id, this.len);
+    addToDeleteSet(transaction.deleteSet, item.id.client, item.id.clock, this.len);
     item.markDeleted();
   }
 
@@ -7763,11 +10251,11 @@ class ContentDeleted {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    writeVarUint(encoder, this.len - offset);
+    encoder.writeLen(this.len - offset);
   }
 
   /**
@@ -7781,10 +10269,10 @@ class ContentDeleted {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentDeleted}
  */
-const readContentDeleted = decoder => new ContentDeleted(readVarUint(decoder));
+const readContentDeleted = decoder => new ContentDeleted(decoder.readLen());
 
 /**
  * @private
@@ -7855,11 +10343,11 @@ class ContentEmbed {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    writeVarString(encoder, JSON.stringify(this.embed));
+    encoder.writeJSON(this.embed);
   }
 
   /**
@@ -7873,10 +10361,10 @@ class ContentEmbed {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentEmbed}
  */
-const readContentEmbed = decoder => new ContentEmbed(JSON.parse(readVarString(decoder)));
+const readContentEmbed = decoder => new ContentEmbed(decoder.readJSON());
 
 /**
  * @private
@@ -7939,7 +10427,11 @@ class ContentFormat {
    * @param {Transaction} transaction
    * @param {Item} item
    */
-  integrate (transaction, item) {}
+  integrate (transaction, item) {
+    // @todo searchmarker are currently unsupported for rich text documents
+    /** @type {AbstractType<any>} */ (item.parent)._searchMarker = null;
+  }
+
   /**
    * @param {Transaction} transaction
    */
@@ -7949,12 +10441,12 @@ class ContentFormat {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    writeVarString(encoder, this.key);
-    writeVarString(encoder, JSON.stringify(this.value));
+    encoder.writeKey(this.key);
+    encoder.writeJSON(this.value);
   }
 
   /**
@@ -7966,10 +10458,10 @@ class ContentFormat {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentFormat}
  */
-const readContentFormat = decoder => new ContentFormat(readVarString(decoder), JSON.parse(readVarString(decoder)));
+const readContentFormat = decoder => new ContentFormat(decoder.readString(), decoder.readJSON());
 
 /**
  * @private
@@ -8046,15 +10538,15 @@ class ContentJSON {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
     const len = this.arr.length;
-    writeVarUint(encoder, len - offset);
+    encoder.writeLen(len - offset);
     for (let i = offset; i < len; i++) {
       const c = this.arr[i];
-      writeVarString(encoder, c === undefined ? 'undefined' : JSON.stringify(c));
+      encoder.writeString(c === undefined ? 'undefined' : JSON.stringify(c));
     }
   }
 
@@ -8069,14 +10561,14 @@ class ContentJSON {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentJSON}
  */
 const readContentJSON = decoder => {
-  const len = readVarUint(decoder);
+  const len = decoder.readLen();
   const cs = [];
   for (let i = 0; i < len; i++) {
-    const c = readVarString(decoder);
+    const c = decoder.readString();
     if (c === 'undefined') {
       cs.push(undefined);
     } else {
@@ -8158,15 +10650,15 @@ class ContentAny {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
     const len = this.arr.length;
-    writeVarUint(encoder, len - offset);
+    encoder.writeLen(len - offset);
     for (let i = offset; i < len; i++) {
       const c = this.arr[i];
-      writeAny(encoder, c);
+      encoder.writeAny(c);
     }
   }
 
@@ -8179,14 +10671,14 @@ class ContentAny {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentAny}
  */
 const readContentAny = decoder => {
-  const len = readVarUint(decoder);
+  const len = decoder.readLen();
   const cs = [];
   for (let i = 0; i < len; i++) {
-    cs.push(readAny(decoder));
+    cs.push(decoder.readAny());
   }
   return new ContentAny(cs)
 };
@@ -8266,11 +10758,11 @@ class ContentString {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    writeVarString(encoder, offset === 0 ? this.str : this.str.slice(offset));
+    encoder.writeString(offset === 0 ? this.str : this.str.slice(offset));
   }
 
   /**
@@ -8284,13 +10776,13 @@ class ContentString {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentString}
  */
-const readContentString = decoder => new ContentString(readVarString(decoder));
+const readContentString = decoder => new ContentString(decoder.readString());
 
 /**
- * @type {Array<function(decoding.Decoder):AbstractType<any>>}
+ * @type {Array<function(AbstractUpdateDecoder):AbstractType<any>>}
  * @private
  */
 const typeRefs = [
@@ -8425,7 +10917,7 @@ class ContentType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
@@ -8443,10 +10935,10 @@ class ContentType {
 /**
  * @private
  *
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentType}
  */
-const readContentType = decoder => new ContentType(typeRefs[readVarUint(decoder)](decoder));
+const readContentType = decoder => new ContentType(typeRefs[decoder.readTypeRef()](decoder));
 
 /**
  * @todo This should return several items
@@ -8704,7 +11196,29 @@ class Item extends AbstractStruct {
      * @type {AbstractContent}
      */
     this.content = content;
+    /**
+     * bit1: keep
+     * bit2: countable
+     * bit3: deleted
+     * bit4: mark - mark node as fast-search-marker
+     * @type {number} byte
+     */
     this.info = this.content.isCountable() ? BIT2 : 0;
+  }
+
+  /**
+   * This is used to mark the item as an indexed fast-search marker
+   *
+   * @type {boolean}
+   */
+  set marker (isMarked) {
+    if (((this.info & BIT4) > 0) !== isMarked) {
+      this.info ^= BIT4;
+    }
+  }
+
+  get marker () {
+    return (this.info & BIT4) > 0
   }
 
   /**
@@ -8904,7 +11418,7 @@ class Item extends AbstractStruct {
       this.content.integrate(transaction, this);
       // add parent to transaction.changed
       addChangedTypeToTransaction(transaction, /** @type {AbstractType<any>} */ (this.parent), this.parentSub);
-      if ((/** @type {AbstractType<any>} */ (this.parent)._item !== null && /** @type {AbstractType<any>} */ (this.parent)._item.deleted) || (this.right !== null && this.parentSub !== null)) {
+      if ((/** @type {AbstractType<any>} */ (this.parent)._item !== null && /** @type {AbstractType<any>} */ (this.parent)._item.deleted) || (this.parentSub !== null && this.right !== null)) {
         // delete if parent is deleted or if this is not the current attribute value of parent
         this.delete(transaction);
       }
@@ -8989,8 +11503,8 @@ class Item extends AbstractStruct {
         parent._length -= this.length;
       }
       this.markDeleted();
-      addToDeleteSet(transaction.deleteSet, this.id, this.length);
-      setIfUndefined(transaction.changed, parent, create$1).add(this.parentSub);
+      addToDeleteSet(transaction.deleteSet, this.id.client, this.id.clock, this.length);
+      setIfUndefined(transaction.changed, parent, create$4).add(this.parentSub);
       this.content.delete(transaction);
     }
   }
@@ -9017,7 +11531,7 @@ class Item extends AbstractStruct {
    *
    * This is called when this Item is sent to a remote peer.
    *
-   * @param {encoding.Encoder} encoder The encoder to write data to.
+   * @param {AbstractUpdateEncoder} encoder The encoder to write data to.
    * @param {number} offset
    */
   write (encoder, offset) {
@@ -9028,12 +11542,12 @@ class Item extends AbstractStruct {
       (origin === null ? 0 : BIT8) | // origin is defined
       (rightOrigin === null ? 0 : BIT7) | // right origin is defined
       (parentSub === null ? 0 : BIT6); // parentSub is non-null
-    writeUint8(encoder, info);
+    encoder.writeInfo(info);
     if (origin !== null) {
-      writeID(encoder, origin);
+      encoder.writeLeftID(origin);
     }
     if (rightOrigin !== null) {
-      writeID(encoder, rightOrigin);
+      encoder.writeRightID(rightOrigin);
     }
     if (origin === null && rightOrigin === null) {
       const parent = /** @type {AbstractType<any>} */ (this.parent);
@@ -9042,14 +11556,14 @@ class Item extends AbstractStruct {
         // parent type on y._map
         // find the correct key
         const ykey = findRootTypeKey(parent);
-        writeVarUint(encoder, 1); // write parentYKey
-        writeVarString(encoder, ykey);
+        encoder.writeParentInfo(true); // write parentYKey
+        encoder.writeString(ykey);
       } else {
-        writeVarUint(encoder, 0); // write parent id
-        writeID(encoder, parentItem.id);
+        encoder.writeParentInfo(false); // write parent id
+        encoder.writeLeftID(parentItem.id);
       }
       if (parentSub !== null) {
-        writeVarString(encoder, parentSub);
+        encoder.writeString(parentSub);
       }
     }
     this.content.write(encoder, offset);
@@ -9057,7 +11571,7 @@ class Item extends AbstractStruct {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @param {number} info
  */
 const readItemContent = (decoder, info) => contentRefs[info & BITS5](decoder);
@@ -9065,7 +11579,7 @@ const readItemContent = (decoder, info) => contentRefs[info & BITS5](decoder);
 /**
  * A lookup map for reading Item content.
  *
- * @type {Array<function(decoding.Decoder):AbstractContent>}
+ * @type {Array<function(AbstractUpdateDecoder):AbstractContent>}
  */
 const contentRefs = [
   () => { throw unexpectedCase() }, // GC is not ItemContent
@@ -9156,7 +11670,7 @@ class AbstractContent {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
@@ -9171,788 +11685,202 @@ class AbstractContent {
   }
 }
 
-/**
- * @param {decoding.Decoder} decoder
- * @param {ID} id
- * @param {number} info
- * @param {Doc} doc
- */
-const readItem = (decoder, id, info, doc) => {
-  /**
-   * The item that was originally to the left of this item.
-   * @type {ID | null}
-   */
-  const origin = (info & BIT8) === BIT8 ? readID(decoder) : null;
-  /**
-   * The item that was originally to the right of this item.
-   * @type {ID | null}
-   */
-  const rightOrigin = (info & BIT7) === BIT7 ? readID(decoder) : null;
-  const canCopyParentInfo = (info & (BIT7 | BIT8)) === 0;
-  const hasParentYKey = canCopyParentInfo ? readVarUint(decoder) === 1 : false;
-  /**
-   * If parent = null and neither left nor right are defined, then we know that `parent` is child of `y`
-   * and we read the next string as parentYKey.
-   * It indicates how we store/retrieve parent from `y.share`
-   * @type {string|null}
-   */
-  const parentYKey = canCopyParentInfo && hasParentYKey ? readVarString(decoder) : null;
 
-  return new Item(
-    id, null, origin, null, rightOrigin,
-    canCopyParentInfo && !hasParentYKey ? readID(decoder) : (parentYKey !== null ? doc.get(parentYKey) : null), // parent
-    canCopyParentInfo && (info & BIT6) === BIT6 ? readVarString(decoder) : null, // parentSub
-    /** @type {AbstractContent} */ (readItemContent(decoder, info)) // item content
-  )
-};
 
-/**
- * @module prng
- */
-
-/**
- * Xorshift32 is a very simple but elegang PRNG with a period of `2^32-1`.
- */
-class Xorshift32 {
-  /**
-   * @param {number} seed Unsigned 32 bit number
-   */
-  constructor (seed) {
-    this.seed = seed;
-    /**
-     * @type {number}
-     */
-    this._state = seed;
-  }
-
-  /**
-   * Generate a random signed integer.
-   *
-   * @return {Number} A 32 bit signed integer.
-   */
-  next () {
-    let x = this._state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    this._state = x;
-    return (x >>> 0) / (BITS32 + 1)
-  }
-}
-
-/**
- * @module prng
- */
-
-/**
- * This is a variant of xoroshiro128plus - the fastest full-period generator passing BigCrush without systematic failures.
- *
- * This implementation follows the idea of the original xoroshiro128plus implementation,
- * but is optimized for the JavaScript runtime. I.e.
- * * The operations are performed on 32bit integers (the original implementation works with 64bit values).
- * * The initial 128bit state is computed based on a 32bit seed and Xorshift32.
- * * This implementation returns two 32bit values based on the 64bit value that is computed by xoroshiro128plus.
- *   Caution: The last addition step works slightly different than in the original implementation - the add carry of the
- *   first 32bit addition is not carried over to the last 32bit.
- *
- * [Reference implementation](http://vigna.di.unimi.it/xorshift/xoroshiro128plus.c)
- */
-class Xoroshiro128plus {
-  /**
-   * @param {number} seed Unsigned 32 bit number
-   */
-  constructor (seed) {
-    this.seed = seed;
-    // This is a variant of Xoroshiro128plus to fill the initial state
-    const xorshift32 = new Xorshift32(seed);
-    this.state = new Uint32Array(4);
-    for (let i = 0; i < 4; i++) {
-      this.state[i] = xorshift32.next() * BITS32;
-    }
-    this._fresh = true;
-  }
-
-  /**
-   * @return {number} Float/Double in [0,1)
-   */
-  next () {
-    const state = this.state;
-    if (this._fresh) {
-      this._fresh = false;
-      return ((state[0] + state[2]) >>> 0) / BITS32
-    } else {
-      this._fresh = true;
-      const s0 = state[0];
-      const s1 = state[1];
-      const s2 = state[2] ^ s0;
-      const s3 = state[3] ^ s1;
-      // function js_rotl (x, k) {
-      //   k = k - 32
-      //   const x1 = x[0]
-      //   const x2 = x[1]
-      //   x[0] = x2 << k | x1 >>> (32 - k)
-      //   x[1] = x1 << k | x2 >>> (32 - k)
-      // }
-      // rotl(s0, 55) // k = 23 = 55 - 32; j = 9 =  32 - 23
-      state[0] = (s1 << 23 | s0 >>> 9) ^ s2 ^ (s2 << 14 | s3 >>> 18);
-      state[1] = (s0 << 23 | s1 >>> 9) ^ s3 ^ (s3 << 14);
-      // rol(s1, 36) // k = 4 = 36 - 32; j = 23 = 32 - 9
-      state[2] = s3 << 4 | s2 >>> 28;
-      state[3] = s2 << 4 | s3 >>> 28;
-      return (((state[1] + state[3]) >>> 0) / (BITS32 + 1))
-    }
-  }
-}
-
-/*
-// Reference implementation
-// Source: http://vigna.di.unimi.it/xorshift/xoroshiro128plus.c
-// By David Blackman and Sebastiano Vigna
-// Who published the reference implementation under Public Domain (CC0)
-
-#include <stdint.h>
-#include <stdio.h>
-
-uint64_t s[2];
-
-static inline uint64_t rotl(const uint64_t x, int k) {
-    return (x << k) | (x >> (64 - k));
-}
-
-uint64_t next(void) {
-    const uint64_t s0 = s[0];
-    uint64_t s1 = s[1];
-    s1 ^= s0;
-    s[0] = rotl(s0, 55) ^ s1 ^ (s1 << 14); // a, b
-    s[1] = rotl(s1, 36); // c
-    return (s[0] + s[1]) & 0xFFFFFFFF;
-}
-
-int main(void)
-{
-    int i;
-    s[0] = 1111 | (1337ul << 32);
-    s[1] = 1234 | (9999ul << 32);
-
-    printf("1000 outputs of genrand_int31()\n");
-    for (i=0; i<100; i++) {
-        printf("%10lu ", i);
-        printf("%10lu ", next());
-        printf("- %10lu ", s[0] >> 32);
-        printf("%10lu ", (s[0] << 32) >> 32);
-        printf("%10lu ", s[1] >> 32);
-        printf("%10lu ", (s[1] << 32) >> 32);
-        printf("\n");
-        // if (i%5==4) printf("\n");
-    }
-    return 0;
-}
-*/
-
-/**
- * Fast Pseudo Random Number Generators.
- *
- * Given a seed a PRNG generates a sequence of numbers that cannot be reasonably predicted.
- * Two PRNGs must generate the same random sequence of numbers if  given the same seed.
- *
- * @module prng
- */
-
-/**
- * Description of the function
- *  @callback generatorNext
- *  @return {number} A 32bit integer
- */
-
-/**
- * A random type generator.
- *
- * @typedef {Object} PRNG
- * @property {generatorNext} next Generate new number
- */
-
-const DefaultPRNG = Xoroshiro128plus;
-
-/**
- * Create a Xoroshiro128plus Pseudo-Random-Number-Generator.
- * This is the fastest full-period generator passing BigCrush without systematic failures.
- * But there are more PRNGs available in ./PRNG/.
- *
- * @param {number} seed A positive 32bit integer. Do not use negative numbers.
- * @return {PRNG}
- */
-const create$5 = seed => new DefaultPRNG(seed);
-
-/**
- * Generates a single random bool.
- *
- * @param {PRNG} gen A random number generator.
- * @return {Boolean} A random boolean
- */
-const bool = gen => (gen.next() >= 0.5);
-
-/**
- * Generates a random integer with 32 bit resolution.
- *
- * @param {PRNG} gen A random number generator.
- * @param {Number} min The lower bound of the allowed return values (inclusive).
- * @param {Number} max The upper bound of the allowed return values (inclusive).
- * @return {Number} A random integer on [min, max]
- */
-const int32 = (gen, min, max) => floor(gen.next() * (max + 1 - min) + min);
-
-/**
- * Optimized version of prng.int32. It has the same precision as prng.int32, but should be preferred when
- * openaring on smaller ranges.
- *
- * @param {PRNG} gen A random number generator.
- * @param {Number} min The lower bound of the allowed return values (inclusive).
- * @param {Number} max The upper bound of the allowed return values (inclusive). The max inclusive number is `binary.BITS31-1`
- * @return {Number} A random integer on [min, max]
- */
-const int31 = (gen, min$1, max) => {
-  const _min = min$1 & BITS31;
-  const _max = max & BITS31;
-  return floor(gen.next() * (min(_max - _min + 1, BITS31) & BITS31) + _min)
-};
-
-/**
- * @param {PRNG} gen
- * @return {string} A single letter (a-z)
- */
-const letter = gen => fromCharCode(int31(gen, 97, 122));
-
-/**
- * @param {PRNG} gen
- * @param {number} [minLen=0]
- * @param {number} [maxLen=20]
- * @return {string} A random word (0-20 characters) without spaces consisting of letters (a-z)
- */
-const word = (gen, minLen = 0, maxLen = 20) => {
-  const len = int31(gen, minLen, maxLen);
-  let str = '';
-  for (let i = 0; i < len; i++) {
-    str += letter(gen);
-  }
-  return str
-};
-
-/**
- * TODO: this function produces invalid runes. Does not cover all of utf16!!
- *
- * @param {PRNG} gen
- * @return {string}
- */
-const utf16Rune = gen => {
-  const codepoint = int31(gen, 0, 256);
-  return fromCodePoint(codepoint)
-};
-
-/**
- * @param {PRNG} gen
- * @param {number} [maxlen = 20]
- */
-const utf16String = (gen, maxlen = 20) => {
-  const len = int31(gen, 0, maxlen);
-  let str = '';
-  for (let i = 0; i < len; i++) {
-    str += utf16Rune(gen);
-  }
-  return str
-};
-
-/**
- * Returns one element of a given array.
- *
- * @param {PRNG} gen A random number generator.
- * @param {Array<T>} array Non empty Array of possible values.
- * @return {T} One of the values of the supplied Array.
- * @template T
- */
-const oneOf = (gen, array) => array[int31(gen, 0, array.length - 1)];
-
-/**
- * Utility helpers for generating statistics.
- *
- * @module statistics
- */
-
-/**
- * @param {Array<number>} arr Array of values
- * @return {number} Returns null if the array is empty
- */
-const median = arr => arr.length === 0 ? NaN : (arr.length % 2 === 1 ? arr[(arr.length - 1) / 2] : (arr[floor((arr.length - 1) / 2)] + arr[ceil((arr.length - 1) / 2)]) / 2);
-
-/**
- * @param {Array<number>} arr
- * @return {number}
- */
-const average = arr => arr.reduce(add, 0) / arr.length;
-
-/**
- * Testing framework with support for generating tests.
- *
- * ```js
- * // test.js template for creating a test executable
- * import { runTests } from 'lib0/testing.js'
- * import * as log from 'lib0/logging.js'
- * import * as mod1 from './mod1.test.js'
- * import * as mod2 from './mod2.test.js'
-
- * import { isBrowser, isNode } from 'lib0/environment.js'
- *
- * if (isBrowser) {
- *   // optional: if this is ran in the browser, attach a virtual console to the dom
- *   log.createVConsole(document.body)
- * }
- *
- * runTests({
- *  mod1,
- *  mod2,
- * }).then(success => {
- *   if (isNode) {
- *     process.exit(success ? 0 : 1)
- *   }
- * })
- * ```
- *
- * ```js
- * // mod1.test.js
- * /**
- *  * runTests automatically tests all exported functions that start with "test".
- *  * The name of the function should be in camelCase and is used for the logging output.
- *  *
- *  * @param {t.TestCase} tc
- *  *\/
- * export const testMyFirstTest = tc => {
- *   t.compare({ a: 4 }, { a: 4 }, 'objects are equal')
- * }
- * ```
- *
- * Now you can simply run `node test.js` to run your test or run test.js in the browser.
- *
- * @module testing
- */
-
-const extensive = hasConf('extensive');
-
-/* istanbul ignore next */
-const envSeed = hasParam('--seed') ? Number.parseInt(getParam('--seed', '0')) : null;
-
-class TestCase {
-  /**
-   * @param {string} moduleName
-   * @param {string} testName
-   */
-  constructor (moduleName, testName) {
-    /**
-     * @type {string}
-     */
-    this.moduleName = moduleName;
-    /**
-     * @type {string}
-     */
-    this.testName = testName;
-    this._seed = null;
-    this._prng = null;
-  }
-
-  resetSeed () {
-    this._seed = null;
-    this._prng = null;
-  }
-
-  /**
-   * @type {number}
-   */
-  /* istanbul ignore next */
-  get seed () {
-    /* istanbul ignore else */
-    if (this._seed === null) {
-      /* istanbul ignore next */
-      this._seed = envSeed === null ? uint32() : envSeed;
-    }
-    return this._seed
-  }
-
-  /**
-   * A PRNG for this test case. Use only this PRNG for randomness to make the test case reproducible.
-   *
-   * @type {prng.PRNG}
-   */
-  get prng () {
-    /* istanbul ignore else */
-    if (this._prng === null) {
-      this._prng = create$5(this.seed);
-    }
-    return this._prng
-  }
-}
-
-const repititionTime = Number(getParam('--repitition-time', '50'));
-/* istanbul ignore next */
-const testFilter = hasParam('--filter') ? getParam('--filter', '') : null;
-
-/* istanbul ignore next */
-const testFilterRegExp = testFilter !== null ? new RegExp(testFilter) : new RegExp('.*');
-
-const repeatTestRegex = /^(repeat|repeating)\s/;
-
-/**
- * @param {string} moduleName
- * @param {string} name
- * @param {function(TestCase):void|Promise<any>} f
- * @param {number} i
- * @param {number} numberOfTests
- */
-const run = async (moduleName, name, f, i, numberOfTests) => {
-  const uncamelized = fromCamelCase(name.slice(4), ' ');
-  const filtered = !testFilterRegExp.test(`[${i + 1}/${numberOfTests}] ${moduleName}: ${uncamelized}`);
-  /* istanbul ignore if */
-  if (filtered) {
-    return true
-  }
-  const tc = new TestCase(moduleName, name);
-  const repeat = repeatTestRegex.test(uncamelized);
-  const groupArgs = [GREY, `[${i + 1}/${numberOfTests}] `, PURPLE, `${moduleName}: `, BLUE, uncamelized];
-  /* istanbul ignore next */
-  if (testFilter === null) {
-    groupCollapsed(...groupArgs);
-  } else {
-    group(...groupArgs);
-  }
-  const times = [];
-  const start = performance.now();
-  let lastTime = start;
-  let err = null;
-  performance.mark(`${name}-start`);
-  do {
-    try {
-      const p = f(tc);
-      if (p != null && p.constructor === Promise) {
-        await p;
-      }
-    } catch (_err) {
-      err = _err;
-    }
-    const currTime = performance.now();
-    times.push(currTime - lastTime);
-    lastTime = currTime;
-    if (repeat && err === null && (lastTime - start) < repititionTime) {
-      tc.resetSeed();
-    } else {
-      break
-    }
-  } while (err === null && (lastTime - start) < repititionTime)
-  performance.mark(`${name}-end`);
-  /* istanbul ignore if */
-  if (err !== null && err.constructor !== SkipError) {
-    printError(err);
-  }
-  performance.measure(name, `${name}-start`, `${name}-end`);
-  groupEnd();
-  const duration = lastTime - start;
-  let success = true;
-  times.sort((a, b) => a - b);
-  /* istanbul ignore next */
-  const againMessage = isBrowser
-    ? `     - ${window.location.href}?filter=\\[${i + 1}/${tc._seed === null ? '' : `&seed=${tc._seed}`}`
-    : `\nrepeat: npm run test -- --filter "\\[${i + 1}/" ${tc._seed === null ? '' : `--seed ${tc._seed}`}`;
-  const timeInfo = (repeat && err === null)
-    ? ` - ${times.length} repititions in ${humanizeDuration(duration)} (best: ${humanizeDuration(times[0])}, worst: ${humanizeDuration(last(times))}, median: ${humanizeDuration(median(times))}, average: ${humanizeDuration(average(times))})`
-    : ` in ${humanizeDuration(duration)}`;
-  if (err !== null) {
-    /* istanbul ignore else */
-    if (err.constructor === SkipError) {
-      print(GREY, BOLD, 'Skipped: ', UNBOLD, uncamelized);
-    } else {
-      success = false;
-      print(RED, BOLD, 'Failure: ', UNBOLD, UNCOLOR, uncamelized, GREY, timeInfo, againMessage);
-    }
-  } else {
-    print(GREEN, BOLD, 'Success: ', UNBOLD, UNCOLOR, uncamelized, GREY, timeInfo, againMessage);
-  }
-  return success
-};
-
-/**
- * Describe what you are currently testing. The message will be logged.
- *
- * ```js
- * export const testMyFirstTest = tc => {
- *   t.describe('crunching numbers', 'already crunched 4 numbers!') // the optional second argument can describe the state.
- * }
- * ```
- *
- * @param {string} description
- * @param {string} info
- */
-const describe = (description, info = '') => print(BLUE, description, ' ', GREY, info);
-
-/**
- * Measure the time that it takes to calculate something.
- *
- * ```js
- * export const testMyFirstTest = tc => {
- *   t.measureTime('measurement', () => {
- *     heavyCalculation()
- *   })
- *   t.group('async measurement', async () => {
- *     await heavyAsyncCalculation()
- *   })
- * }
- * ```
- *
- * @param {string} message
- * @param {function():void|Promise<undefined>} f
- */
-const measureTime = async (message, f) => {
-  let duration = 0;
-  let iterations = 0;
-  const start = performance.now();
-  while (duration < 5) {
-    const p = f();
-    if (p) {
-      await p;
-    }
-    duration = performance.now() - start;
-    iterations++;
-  }
-  const iterationsInfo = iterations > 1 ? `, ${iterations} repititions` : '';
-  print(PURPLE, message, GREY, ` ${humanizeDuration(duration / iterations)}${iterationsInfo}`);
-};
-
-/**
- * @template T
- * @param {Array<T>} as
- * @param {Array<T>} bs
- * @param {string} [m]
- * @return {boolean}
- */
-const compareArrays = (as, bs, m = 'Arrays match') => {
-  if (as.length !== bs.length) {
-    fail(m);
-  }
-  for (let i = 0; i < as.length; i++) {
-    if (as[i] !== bs[i]) {
-      fail(m);
-    }
-  }
-  return true
-};
-
-/**
- * @param {any} constructor
- * @param {any} a
- * @param {any} b
- * @param {string} path
- * @throws {TestError}
- */
-const compareValues = (constructor, a, b, path) => {
-  if (a !== b) {
-    fail(`Values ${stringify(a)} and ${stringify(b)} don't match (${path})`);
-  }
-  return true
-};
-
-/**
- * @param {string?} message
- * @param {string} reason
- * @param {string} path
- * @throws {TestError}
- */
-const _failMessage = (message, reason, path) => fail(
-  message === null
-    ? `${reason} ${path}`
-    : `${message} (${reason}) ${path}`
-);
-
-/**
- * @param {any} a
- * @param {any} b
- * @param {string} path
- * @param {string?} message
- * @param {function(any,any,any,string,any):boolean} customCompare
- */
-const _compare = (a, b, path, message, customCompare) => {
-  // we don't use assert here because we want to test all branches (istanbul errors if one branch is not tested)
-  if (a == null || b == null) {
-    return compareValues(null, a, b, path)
-  }
-  if (a.constructor !== b.constructor) {
-    _failMessage(message, 'Constructors don\'t match', path);
-  }
-  let success = true;
-  switch (a.constructor) {
-    case ArrayBuffer:
-      a = new Uint8Array(a);
-      b = new Uint8Array(b);
-    // eslint-disable-next-line no-fallthrough
-    case Uint8Array: {
-      if (a.byteLength !== b.byteLength) {
-        _failMessage(message, 'ArrayBuffer lengths match', path);
-      }
-      for (let i = 0; success && i < a.length; i++) {
-        success = success && a[i] === b[i];
-      }
-      break
-    }
-    case Set: {
-      if (a.size !== b.size) {
-        _failMessage(message, 'Sets have different number of attributes', path);
-      }
-      // @ts-ignore
-      a.forEach(value => {
-        if (!b.has(value)) {
-          _failMessage(message, `b.${path} does have ${value}`, path);
-        }
-      });
-      break
-    }
-    case Map: {
-      if (a.size !== b.size) {
-        _failMessage(message, 'Maps have different number of attributes', path);
-      }
-      // @ts-ignore
-      a.forEach((value, key) => {
-        if (!b.has(key)) {
-          _failMessage(message, `Property ${path}["${key}"] does not exist on second argument`, path);
-        }
-        _compare(value, b.get(key), `${path}["${key}"]`, message, customCompare);
-      });
-      break
-    }
-    case Object:
-      if (length$1(a) !== length$1(b)) {
-        _failMessage(message, 'Objects have a different number of attributes', path);
-      }
-      forEach(a, (value, key) => {
-        if (!hasProperty(b, key)) {
-          _failMessage(message, `Property ${path} does not exist on second argument`, path);
-        }
-        _compare(value, b[key], `${path}["${key}"]`, message, customCompare);
-      });
-      break
-    case Array:
-      if (a.length !== b.length) {
-        _failMessage(message, 'Arrays have a different number of attributes', path);
-      }
-      // @ts-ignore
-      a.forEach((value, i) => _compare(value, b[i], `${path}[${i}]`, message, customCompare));
-      break
-    /* istanbul ignore next */
-    default:
-      if (!customCompare(a.constructor, a, b, path, compareValues)) {
-        _failMessage(message, `Values ${stringify(a)} and ${stringify(b)} don't match`, path);
-      }
-  }
-  assert(success, message);
-  return true
-};
-
-/**
- * @template T
- * @param {T} a
- * @param {T} b
- * @param {string?} [message]
- * @param {function(any,T,T,string,any):boolean} [customCompare]
- */
-const compare = (a, b, message = null, customCompare = compareValues) => _compare(a, b, 'obj', message, customCompare);
-
-/* istanbul ignore next */
-/**
- * @param {boolean} condition
- * @param {string?} [message]
- * @throws {TestError}
- */
-const assert = (condition, message = null) => condition || fail(`Assertion failed${message !== null ? `: ${message}` : ''}`);
-
-/**
- * @param {function():void} f
- * @throws {TestError}
- */
-const fails = f => {
-  let err = null;
-  try {
-    f();
-  } catch (_err) {
-    err = _err;
-    print(GREEN, '⇖ This Error was expected');
-  }
-  /* istanbul ignore if */
-  if (err === null) {
-    fail('Expected this to fail');
-  }
-};
-
-/**
- * @param {Object<string, Object<string, function(TestCase):void|Promise<any>>>} tests
- */
-const runTests = async tests => {
-  const numberOfTests = map$1(tests, mod => map$1(mod, f => /* istanbul ignore next */ f ? 1 : 0).reduce(add, 0)).reduce(add, 0);
-  let successfulTests = 0;
-  let testnumber = 0;
-  const start = performance.now();
-  for (const modName in tests) {
-    const mod = tests[modName];
-    for (const fname in mod) {
-      const f = mod[fname];
-      /* istanbul ignore else */
-      if (f) {
-        const repeatEachTest = 1;
-        let success = true;
-        for (let i = 0; success && i < repeatEachTest; i++) {
-          success = await run(modName, fname, f, testnumber, numberOfTests);
-        }
-        testnumber++;
-        /* istanbul ignore else */
-        if (success) {
-          successfulTests++;
-        }
-      }
-    }
-  }
-  const end = performance.now();
-  print('');
-  const success = successfulTests === numberOfTests;
-  /* istanbul ignore next */
-  if (success) {
-    /* istanbul ignore next */
-    print(GREEN, BOLD, 'All tests successful!', GREY, UNBOLD, ` in ${humanizeDuration(end - start)}`);
-    /* istanbul ignore next */
-    printImgBase64(nyanCatImage, 50);
-  } else {
-    const failedTests = numberOfTests - successfulTests;
-    print(RED, BOLD, `> ${failedTests} test${failedTests > 1 ? 's' : ''} failed`);
-  }
-  return success
-};
-
-class TestError extends Error {}
-
-/**
- * @param {string} reason
- * @throws {TestError}
- */
-const fail = reason => {
-  print(RED, BOLD, 'X ', UNBOLD, reason);
-  throw new TestError('Test Failed')
-};
-
-class SkipError extends Error {}
-
-/**
- * @param {boolean} cond If true, this tests will be skipped
- * @throws {SkipError}
- */
-const skip = (cond = true) => {
-  if (cond) {
-    throw new SkipError('skipping..')
-  }
-};
-
-// eslint-disable-next-line
-const nyanCatImage = 'R0lGODlhjABMAPcAAMiSE0xMTEzMzUKJzjQ0NFsoKPc7//FM/9mH/z9x0HIiIoKCgmBHN+frGSkZLdDQ0LCwsDk71g0KCUzDdrQQEOFz/8yYdelmBdTiHFxcXDU2erR/mLrTHCgoKK5szBQUFNgSCTk6ymfpCB9VZS2Bl+cGBt2N8kWm0uDcGXhZRUvGq94NCFPhDiwsLGVlZTgqIPMDA1g3aEzS5D6xAURERDtG9JmBjJsZGWs2AD1W6Hp6eswyDeJ4CFNTU1LcEoJRmTMzSd14CTg5ser2GmDzBd17/xkZGUzMvoSMDiEhIfKruCwNAJaWlvRzA8kNDXDrCfi0pe1U/+GS6SZrAB4eHpZwVhoabsx9oiYmJt/TGHFxcYyMjOid0+Zl/0rF6j09PeRr/0zU9DxO6j+z0lXtBtp8qJhMAEssLGhoaPL/GVn/AAsWJ/9/AE3Z/zs9/3cAAOlf/+aa2RIyADo85uhh/0i84WtrazQ0UyMlmDMzPwUFBe16BTMmHau0E03X+g8pMEAoS1MBAf++kkzO8pBaqSZoe9uB/zE0BUQ3Sv///4WFheuiyzo880gzNDIyNissBNqF/8RiAOF2qG5ubj0vL1z6Avl5ASsgGkgUSy8vL/8n/z4zJy8lOv96uEssV1csAN5ZCDQ0Wz1a3tbEGHLeDdYKCg4PATE7PiMVFSoqU83eHEi43gUPAOZ8reGogeKU5dBBC8faHEez2lHYF4bQFMukFtl4CzY3kkzBVJfMGZkAAMfSFf27mP0t//g4/9R6Dfsy/1DRIUnSAPRD/0fMAFQ0Q+l7rnbaD0vEntCDD6rSGtO8GNpUCU/MK07LPNEfC7RaABUWWkgtOst+71v9AfD7GfDw8P19ATtA/NJpAONgB9yL+fm6jzIxMdnNGJxht1/2A9x//9jHGOSX3+5tBP27l35+fk5OTvZ9AhYgTjo0PUhGSDs9+LZjCFf2Aw0IDwcVAA8PD5lwg9+Q7YaChC0kJP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh/wtYTVAgRGF0YVhNUDw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDpGNEM2MUEyMzE0QTRFMTExOUQzRkE3QTBCRDNBMjdBQyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDpERjQ0NEY0QkI2MTcxMUUxOUJEQkUzNUNGQTkwRTU2MiIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDpERjQ0NEY0QUI2MTcxMUUxOUJEQkUzNUNGQTkwRTU2MiIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IFdpbmRvd3MiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo1OEE3RTIwRjcyQTlFMTExOTQ1QkY2QTU5QzVCQjJBOSIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDpGNEM2MUEyMzE0QTRFMTExOUQzRkE3QTBCRDNBMjdBQyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PgH//v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4N/e3dzb2tnY19bV1NPS0dDPzs3My8rJyMfGxcTDwsHAv769vLu6ubi3trW0s7KxsK+urayrqqmop6alpKOioaCfnp2cm5qZmJeWlZSTkpGQj46NjIuKiYiHhoWEg4KBgH9+fXx7enl4d3Z1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';
+var Y = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  AbstractConnector: AbstractConnector,
+  DeleteItem: DeleteItem,
+  DeleteSet: DeleteSet,
+  iterateDeletedStructs: iterateDeletedStructs,
+  findIndexDS: findIndexDS,
+  isDeleted: isDeleted,
+  sortAndMergeDeleteSet: sortAndMergeDeleteSet,
+  mergeDeleteSets: mergeDeleteSets,
+  addToDeleteSet: addToDeleteSet,
+  createDeleteSet: createDeleteSet,
+  createDeleteSetFromStructStore: createDeleteSetFromStructStore,
+  writeDeleteSet: writeDeleteSet,
+  readDeleteSet: readDeleteSet,
+  readAndApplyDeleteSet: readAndApplyDeleteSet,
+  generateNewClientId: generateNewClientId,
+  Doc: Doc,
+  AbstractDSDecoder: AbstractDSDecoder,
+  AbstractUpdateDecoder: AbstractUpdateDecoder,
+  DSDecoderV1: DSDecoderV1,
+  UpdateDecoderV1: UpdateDecoderV1,
+  DSDecoderV2: DSDecoderV2,
+  UpdateDecoderV2: UpdateDecoderV2,
+  AbstractDSEncoder: AbstractDSEncoder,
+  AbstractUpdateEncoder: AbstractUpdateEncoder,
+  DSEncoderV1: DSEncoderV1,
+  UpdateEncoderV1: UpdateEncoderV1,
+  DSEncoderV2: DSEncoderV2,
+  UpdateEncoderV2: UpdateEncoderV2,
+  get DefaultDSEncoder () { return DefaultDSEncoder; },
+  get DefaultDSDecoder () { return DefaultDSDecoder; },
+  get DefaultUpdateEncoder () { return DefaultUpdateEncoder; },
+  get DefaultUpdateDecoder () { return DefaultUpdateDecoder; },
+  useV1Encoding: useV1Encoding,
+  useV2Encoding: useV2Encoding,
+  writeClientsStructs: writeClientsStructs,
+  readClientsStructRefs: readClientsStructRefs,
+  tryResumePendingDeleteReaders: tryResumePendingDeleteReaders,
+  writeStructsFromTransaction: writeStructsFromTransaction,
+  readStructs: readStructs,
+  readUpdateV2: readUpdateV2,
+  readUpdate: readUpdate,
+  applyUpdateV2: applyUpdateV2,
+  applyUpdate: applyUpdate,
+  writeStateAsUpdate: writeStateAsUpdate,
+  encodeStateAsUpdateV2: encodeStateAsUpdateV2,
+  encodeStateAsUpdate: encodeStateAsUpdate,
+  readStateVector: readStateVector,
+  decodeStateVectorV2: decodeStateVectorV2,
+  decodeStateVector: decodeStateVector,
+  writeStateVector: writeStateVector,
+  writeDocumentStateVector: writeDocumentStateVector,
+  encodeStateVectorV2: encodeStateVectorV2,
+  encodeStateVector: encodeStateVector,
+  EventHandler: EventHandler,
+  createEventHandler: createEventHandler,
+  addEventHandlerListener: addEventHandlerListener,
+  removeEventHandlerListener: removeEventHandlerListener,
+  removeAllEventHandlerListeners: removeAllEventHandlerListeners,
+  callEventHandlerListeners: callEventHandlerListeners,
+  ID: ID,
+  compareIDs: compareIDs,
+  createID: createID,
+  writeID: writeID,
+  readID: readID,
+  findRootTypeKey: findRootTypeKey,
+  isParentOf: isParentOf,
+  logType: logType,
+  PermanentUserData: PermanentUserData,
+  RelativePosition: RelativePosition,
+  createRelativePositionFromJSON: createRelativePositionFromJSON,
+  AbsolutePosition: AbsolutePosition,
+  createAbsolutePosition: createAbsolutePosition,
+  createRelativePosition: createRelativePosition,
+  createRelativePositionFromTypeIndex: createRelativePositionFromTypeIndex,
+  writeRelativePosition: writeRelativePosition,
+  encodeRelativePosition: encodeRelativePosition,
+  readRelativePosition: readRelativePosition,
+  decodeRelativePosition: decodeRelativePosition,
+  createAbsolutePositionFromRelativePosition: createAbsolutePositionFromRelativePosition,
+  compareRelativePositions: compareRelativePositions,
+  Snapshot: Snapshot,
+  equalSnapshots: equalSnapshots,
+  encodeSnapshotV2: encodeSnapshotV2,
+  encodeSnapshot: encodeSnapshot,
+  decodeSnapshotV2: decodeSnapshotV2,
+  decodeSnapshot: decodeSnapshot,
+  createSnapshot: createSnapshot,
+  emptySnapshot: emptySnapshot,
+  snapshot: snapshot,
+  isVisible: isVisible,
+  splitSnapshotAffectedStructs: splitSnapshotAffectedStructs,
+  StructStore: StructStore,
+  getStateVector: getStateVector,
+  getState: getState,
+  integretyCheck: integretyCheck,
+  addStruct: addStruct,
+  findIndexSS: findIndexSS,
+  find: find,
+  getItem: getItem,
+  findIndexCleanStart: findIndexCleanStart,
+  getItemCleanStart: getItemCleanStart,
+  getItemCleanEnd: getItemCleanEnd,
+  replaceStruct: replaceStruct,
+  iterateStructs: iterateStructs,
+  Transaction: Transaction,
+  writeUpdateMessageFromTransaction: writeUpdateMessageFromTransaction,
+  nextID: nextID,
+  addChangedTypeToTransaction: addChangedTypeToTransaction,
+  tryGc: tryGc,
+  transact: transact,
+  UndoManager: UndoManager,
+  YEvent: YEvent,
+  ArraySearchMarker: ArraySearchMarker,
+  findMarker: findMarker,
+  updateMarkerChanges: updateMarkerChanges,
+  getTypeChildren: getTypeChildren,
+  callTypeObservers: callTypeObservers,
+  AbstractType: AbstractType,
+  typeListToArray: typeListToArray,
+  typeListToArraySnapshot: typeListToArraySnapshot,
+  typeListForEach: typeListForEach,
+  typeListMap: typeListMap,
+  typeListCreateIterator: typeListCreateIterator,
+  typeListForEachSnapshot: typeListForEachSnapshot,
+  typeListGet: typeListGet,
+  typeListInsertGenericsAfter: typeListInsertGenericsAfter,
+  typeListInsertGenerics: typeListInsertGenerics,
+  typeListDelete: typeListDelete,
+  typeMapDelete: typeMapDelete,
+  typeMapSet: typeMapSet,
+  typeMapGet: typeMapGet,
+  typeMapGetAll: typeMapGetAll,
+  typeMapHas: typeMapHas,
+  typeMapGetSnapshot: typeMapGetSnapshot,
+  createMapIterator: createMapIterator,
+  YArrayEvent: YArrayEvent,
+  YArray: YArray,
+  readYArray: readYArray,
+  YMapEvent: YMapEvent,
+  YMap: YMap,
+  readYMap: readYMap,
+  ItemTextListPosition: ItemTextListPosition,
+  cleanupYTextFormatting: cleanupYTextFormatting,
+  YTextEvent: YTextEvent,
+  YText: YText,
+  readYText: readYText,
+  YXmlTreeWalker: YXmlTreeWalker,
+  YXmlFragment: YXmlFragment,
+  readYXmlFragment: readYXmlFragment,
+  YXmlElement: YXmlElement,
+  readYXmlElement: readYXmlElement,
+  YXmlEvent: YXmlEvent,
+  YXmlHook: YXmlHook,
+  readYXmlHook: readYXmlHook,
+  YXmlText: YXmlText,
+  readYXmlText: readYXmlText,
+  AbstractStruct: AbstractStruct,
+  structGCRefNumber: structGCRefNumber,
+  GC: GC,
+  ContentBinary: ContentBinary,
+  readContentBinary: readContentBinary,
+  ContentDeleted: ContentDeleted,
+  readContentDeleted: readContentDeleted,
+  ContentEmbed: ContentEmbed,
+  readContentEmbed: readContentEmbed,
+  ContentFormat: ContentFormat,
+  readContentFormat: readContentFormat,
+  ContentJSON: ContentJSON,
+  readContentJSON: readContentJSON,
+  ContentAny: ContentAny,
+  readContentAny: readContentAny,
+  ContentString: ContentString,
+  readContentString: readContentString,
+  typeRefs: typeRefs,
+  YArrayRefID: YArrayRefID,
+  YMapRefID: YMapRefID,
+  YTextRefID: YTextRefID,
+  YXmlElementRefID: YXmlElementRefID,
+  YXmlFragmentRefID: YXmlFragmentRefID,
+  YXmlHookRefID: YXmlHookRefID,
+  YXmlTextRefID: YXmlTextRefID,
+  ContentType: ContentType,
+  readContentType: readContentType,
+  followRedone: followRedone,
+  keepItem: keepItem,
+  splitItem: splitItem,
+  redoItem: redoItem,
+  Item: Item,
+  readItemContent: readItemContent,
+  contentRefs: contentRefs,
+  AbstractContent: AbstractContent
+});
 
 /**
  * @module sync-protocol
@@ -10075,6 +12003,11 @@ const readSyncMessage = (decoder, encoder, doc, transactionOrigin) => {
   }
   return messageType
 };
+
+if (typeof window !== 'undefined') {
+  // @ts-ignore
+  window.Y = Y; // eslint-disable-line
+}
 
 /**
  * @param {TestYInstance} y // publish message created by `y` to all other online clients
@@ -10221,7 +12154,7 @@ class TestConnector {
       // console.log('receive (' + sender.userID + '->' + receiver.userID + '):\n', syncProtocol.stringifySyncMessage(decoding.createDecoder(m), receiver))
       // do not publish data created when this function is executed (could be ss2 or update message)
       readSyncMessage(createDecoder(m), encoder, receiver, receiver.tc);
-      if (length(encoder) > 0) {
+      if (length$1(encoder) > 0) {
         // send reply message
         sender._receive(toUint8Array(encoder), receiver);
       }
@@ -10291,7 +12224,7 @@ class TestConnector {
  * @param {t.TestCase} tc
  * @param {{users?:number}} conf
  * @param {InitTestObjectCallback<T>} [initTestObject]
- * @return {{testObjects:Array<any>,testConnector:TestConnector,users:Array<TestYInstance>,array0:Y.Array<any>,array1:Y.Array<any>,array2:Y.Array<any>,map0:Y.Map<any>,map1:Y.Map<any>,map2:Y.Map<any>,map3:Y.Map<any>,text0:Y.Text,text1:Y.Text,text2:Y.Text,xml0:Y.XmlElement,xml1:Y.XmlElement,xml2:Y.XmlElement}}
+ * @return {{testObjects:Array<any>,testConnector:TestConnector,users:Array<TestYInstance>,array0:Y.YArray<any>,array1:Y.YArray<any>,array2:Y.YArray<any>,map0:Y.YMap<any>,map1:Y.YMap<any>,map2:Y.YMap<any>,map3:Y.YMap<any>,text0:Y.YText,text1:Y.YText,text2:Y.YText,xml0:Y.YXmlElement,xml1:Y.YXmlElement,xml2:Y.YXmlElement}}
  */
 const init = (tc, { users = 5 } = {}, initTestObject) => {
   /**
@@ -10301,19 +12234,27 @@ const init = (tc, { users = 5 } = {}, initTestObject) => {
     users: []
   };
   const gen = tc.prng;
+  // choose an encoding approach at random
+  if (bool(gen)) {
+    useV2Encoding();
+  } else {
+    useV1Encoding();
+  }
+
   const testConnector = new TestConnector(gen);
   result.testConnector = testConnector;
   for (let i = 0; i < users; i++) {
     const y = testConnector.createY(i);
     y.clientID = i;
     result.users.push(y);
-    result['array' + i] = y.get('array', YArray);
-    result['map' + i] = y.get('map', YMap);
+    result['array' + i] = y.getArray('array');
+    result['map' + i] = y.getMap('map');
     result['xml' + i] = y.get('xml', YXmlElement);
-    result['text' + i] = y.get('text', YText);
+    result['text' + i] = y.getText('text');
   }
   testConnector.syncAll();
   result.testObjects = result.users.map(initTestObject || (() => null));
+  useV1Encoding();
   return /** @type {any} */ (result)
 };
 
@@ -10368,15 +12309,15 @@ const compare$1 = users => {
 };
 
 /**
- * @param {Item?} a
- * @param {Item?} b
+ * @param {Y.Item?} a
+ * @param {Y.Item?} b
  * @return {boolean}
  */
 const compareItemIDs = (a, b) => a === b || (a !== null && b != null && compareIDs(a.id, b.id));
 
 /**
- * @param {StructStore} ss1
- * @param {StructStore} ss2
+ * @param {Y.StructStore} ss1
+ * @param {Y.StructStore} ss2
  */
 const compareStructStores = (ss1, ss2) => {
   assert(ss1.clients.size === ss2.clients.size);
@@ -10418,13 +12359,13 @@ const compareStructStores = (ss1, ss2) => {
 };
 
 /**
- * @param {DeleteSet} ds1
- * @param {DeleteSet} ds2
+ * @param {Y.DeleteSet} ds1
+ * @param {Y.DeleteSet} ds2
  */
 const compareDS = (ds1, ds2) => {
   assert(ds1.clients.size === ds2.clients.size);
-  for (const [client, deleteItems1] of ds1.clients) {
-    const deleteItems2 = /** @type {Array<DeleteItem>} */ (ds2.clients.get(client));
+  ds1.clients.forEach((deleteItems1, client) => {
+    const deleteItems2 = /** @type {Array<Y.DeleteItem>} */ (ds2.clients.get(client));
     assert(deleteItems2 !== undefined && deleteItems1.length === deleteItems2.length);
     for (let i = 0; i < deleteItems1.length; i++) {
       const di1 = deleteItems1[i];
@@ -10433,7 +12374,7 @@ const compareDS = (ds1, ds2) => {
         fail('DeleteSets dont match');
       }
     }
-  }
+  });
 };
 
 /**
@@ -10455,21 +12396,21 @@ const applyRandomTests = (tc, mods, iterations, initTestObject) => {
   const result = init(tc, { users: 5 }, initTestObject);
   const { testConnector, users } = result;
   for (let i = 0; i < iterations; i++) {
-    if (int31(gen, 0, 100) <= 2) {
+    if (int32(gen, 0, 100) <= 2) {
       // 2% chance to disconnect/reconnect a random user
       if (bool(gen)) {
         testConnector.disconnectRandom();
       } else {
         testConnector.reconnectRandom();
       }
-    } else if (int31(gen, 0, 100) <= 1) {
+    } else if (int32(gen, 0, 100) <= 1) {
       // 1% chance to flush all
       testConnector.flushAllMessages();
-    } else if (int31(gen, 0, 100) <= 50) {
+    } else if (int32(gen, 0, 100) <= 50) {
       // 50% chance to flush a random message
       testConnector.flushRandomMessage();
     }
-    const user = int31(gen, 0, users.length - 1);
+    const user = int32(gen, 0, users.length - 1);
     const test = oneOf(gen, mods);
     test(users[user], gen, result.testObjects[user]);
   }
@@ -10477,7 +12418,7 @@ const applyRandomTests = (tc, mods, iterations, initTestObject) => {
   return result
 };
 
-var Y = /*#__PURE__*/Object.freeze({
+var Y$1 = /*#__PURE__*/Object.freeze({
   __proto__: null,
   TestYInstance: TestYInstance,
   TestConnector: TestConnector,
@@ -10487,6 +12428,7 @@ var Y = /*#__PURE__*/Object.freeze({
   compareStructStores: compareStructStores,
   compareDS: compareDS,
   applyRandomTests: applyRandomTests,
+  AbstractConnector: AbstractConnector,
   DeleteItem: DeleteItem,
   DeleteSet: DeleteSet,
   iterateDeletedStructs: iterateDeletedStructs,
@@ -10502,19 +12444,42 @@ var Y = /*#__PURE__*/Object.freeze({
   readAndApplyDeleteSet: readAndApplyDeleteSet,
   generateNewClientId: generateNewClientId,
   Doc: Doc,
+  AbstractDSDecoder: AbstractDSDecoder,
+  AbstractUpdateDecoder: AbstractUpdateDecoder,
+  DSDecoderV1: DSDecoderV1,
+  UpdateDecoderV1: UpdateDecoderV1,
+  DSDecoderV2: DSDecoderV2,
+  UpdateDecoderV2: UpdateDecoderV2,
+  AbstractDSEncoder: AbstractDSEncoder,
+  AbstractUpdateEncoder: AbstractUpdateEncoder,
+  DSEncoderV1: DSEncoderV1,
+  UpdateEncoderV1: UpdateEncoderV1,
+  DSEncoderV2: DSEncoderV2,
+  UpdateEncoderV2: UpdateEncoderV2,
+  get DefaultDSEncoder () { return DefaultDSEncoder; },
+  get DefaultDSDecoder () { return DefaultDSDecoder; },
+  get DefaultUpdateEncoder () { return DefaultUpdateEncoder; },
+  get DefaultUpdateDecoder () { return DefaultUpdateDecoder; },
+  useV1Encoding: useV1Encoding,
+  useV2Encoding: useV2Encoding,
   writeClientsStructs: writeClientsStructs,
   readClientsStructRefs: readClientsStructRefs,
   tryResumePendingDeleteReaders: tryResumePendingDeleteReaders,
   writeStructsFromTransaction: writeStructsFromTransaction,
   readStructs: readStructs,
+  readUpdateV2: readUpdateV2,
   readUpdate: readUpdate,
+  applyUpdateV2: applyUpdateV2,
   applyUpdate: applyUpdate,
   writeStateAsUpdate: writeStateAsUpdate,
+  encodeStateAsUpdateV2: encodeStateAsUpdateV2,
   encodeStateAsUpdate: encodeStateAsUpdate,
   readStateVector: readStateVector,
+  decodeStateVectorV2: decodeStateVectorV2,
   decodeStateVector: decodeStateVector,
   writeStateVector: writeStateVector,
   writeDocumentStateVector: writeDocumentStateVector,
+  encodeStateVectorV2: encodeStateVectorV2,
   encodeStateVector: encodeStateVector,
   EventHandler: EventHandler,
   createEventHandler: createEventHandler,
@@ -10529,6 +12494,7 @@ var Y = /*#__PURE__*/Object.freeze({
   readID: readID,
   findRootTypeKey: findRootTypeKey,
   isParentOf: isParentOf,
+  logType: logType,
   PermanentUserData: PermanentUserData,
   RelativePosition: RelativePosition,
   createRelativePositionFromJSON: createRelativePositionFromJSON,
@@ -10544,7 +12510,9 @@ var Y = /*#__PURE__*/Object.freeze({
   compareRelativePositions: compareRelativePositions,
   Snapshot: Snapshot,
   equalSnapshots: equalSnapshots,
+  encodeSnapshotV2: encodeSnapshotV2,
   encodeSnapshot: encodeSnapshot,
+  decodeSnapshotV2: decodeSnapshotV2,
   decodeSnapshot: decodeSnapshot,
   createSnapshot: createSnapshot,
   emptySnapshot: emptySnapshot,
@@ -10565,13 +12533,16 @@ var Y = /*#__PURE__*/Object.freeze({
   replaceStruct: replaceStruct,
   iterateStructs: iterateStructs,
   Transaction: Transaction,
-  computeUpdateMessageFromTransaction: computeUpdateMessageFromTransaction,
+  writeUpdateMessageFromTransaction: writeUpdateMessageFromTransaction,
   nextID: nextID,
   addChangedTypeToTransaction: addChangedTypeToTransaction,
   tryGc: tryGc,
   transact: transact,
   UndoManager: UndoManager,
   YEvent: YEvent,
+  ArraySearchMarker: ArraySearchMarker,
+  findMarker: findMarker,
+  updateMarkerChanges: updateMarkerChanges,
   getTypeChildren: getTypeChildren,
   callTypeObservers: callTypeObservers,
   AbstractType: AbstractType,
@@ -10598,9 +12569,7 @@ var Y = /*#__PURE__*/Object.freeze({
   YMapEvent: YMapEvent,
   YMap: YMap,
   readYMap: readYMap,
-  ItemListPosition: ItemListPosition,
   ItemTextListPosition: ItemTextListPosition,
-  ItemInsertionResult: ItemInsertionResult,
   cleanupYTextFormatting: cleanupYTextFormatting,
   YTextEvent: YTextEvent,
   YText: YText,
@@ -10647,535 +12616,9 @@ var Y = /*#__PURE__*/Object.freeze({
   splitItem: splitItem,
   redoItem: redoItem,
   Item: Item,
+  readItemContent: readItemContent,
   contentRefs: contentRefs,
-  AbstractContent: AbstractContent,
-  readItem: readItem
-});
-
-/**
- * @param {t.TestCase} tc
- */
-const testDeleteInsert = tc => {
-  const { users, array0 } = init(tc, { users: 2 });
-  array0.delete(0, 0);
-  describe('Does not throw when deleting zero elements with position 0');
-  fails(() => {
-    array0.delete(1, 1);
-  });
-  array0.insert(0, ['A']);
-  array0.delete(1, 0);
-  describe('Does not throw when deleting zero elements with valid position 1');
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testInsertThreeElementsTryRegetProperty = tc => {
-  const { testConnector, users, array0, array1 } = init(tc, { users: 2 });
-  array0.insert(0, [1, true, false]);
-  compare(array0.toJSON(), [1, true, false], '.toJSON() works');
-  testConnector.flushAllMessages();
-  compare(array1.toJSON(), [1, true, false], '.toJSON() works after sync');
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testConcurrentInsertWithThreeConflicts = tc => {
-  var { users, array0, array1, array2 } = init(tc, { users: 3 });
-  array0.insert(0, [0]);
-  array1.insert(0, [1]);
-  array2.insert(0, [2]);
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testConcurrentInsertDeleteWithThreeConflicts = tc => {
-  const { testConnector, users, array0, array1, array2 } = init(tc, { users: 3 });
-  array0.insert(0, ['x', 'y', 'z']);
-  testConnector.flushAllMessages();
-  array0.insert(1, [0]);
-  array1.delete(0);
-  array1.delete(1, 1);
-  array2.insert(1, [2]);
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testInsertionsInLateSync = tc => {
-  const { testConnector, users, array0, array1, array2 } = init(tc, { users: 3 });
-  array0.insert(0, ['x', 'y']);
-  testConnector.flushAllMessages();
-  users[1].disconnect();
-  users[2].disconnect();
-  array0.insert(1, ['user0']);
-  array1.insert(1, ['user1']);
-  array2.insert(1, ['user2']);
-  users[1].connect();
-  users[2].connect();
-  testConnector.flushAllMessages();
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testDisconnectReallyPreventsSendingMessages = tc => {
-  var { testConnector, users, array0, array1 } = init(tc, { users: 3 });
-  array0.insert(0, ['x', 'y']);
-  testConnector.flushAllMessages();
-  users[1].disconnect();
-  users[2].disconnect();
-  array0.insert(1, ['user0']);
-  array1.insert(1, ['user1']);
-  compare(array0.toJSON(), ['x', 'user0', 'y']);
-  compare(array1.toJSON(), ['x', 'user1', 'y']);
-  users[1].connect();
-  users[2].connect();
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testDeletionsInLateSync = tc => {
-  const { testConnector, users, array0, array1 } = init(tc, { users: 2 });
-  array0.insert(0, ['x', 'y']);
-  testConnector.flushAllMessages();
-  users[1].disconnect();
-  array1.delete(1, 1);
-  array0.delete(0, 2);
-  users[1].connect();
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testInsertThenMergeDeleteOnSync = tc => {
-  const { testConnector, users, array0, array1 } = init(tc, { users: 2 });
-  array0.insert(0, ['x', 'y', 'z']);
-  testConnector.flushAllMessages();
-  users[0].disconnect();
-  array1.delete(0, 3);
-  users[0].connect();
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testInsertAndDeleteEvents = tc => {
-  const { array0, users } = init(tc, { users: 2 });
-  /**
-   * @type {Object<string,any>?}
-   */
-  let event = null;
-  array0.observe(e => {
-    event = e;
-  });
-  array0.insert(0, [0, 1, 2]);
-  assert(event !== null);
-  event = null;
-  array0.delete(0);
-  assert(event !== null);
-  event = null;
-  array0.delete(0, 2);
-  assert(event !== null);
-  event = null;
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testNestedObserverEvents = tc => {
-  const { array0, users } = init(tc, { users: 2 });
-  /**
-   * @type {Array<number>}
-   */
-  const vals = [];
-  array0.observe(e => {
-    if (array0.length === 1) {
-      // inserting, will call this observer again
-      // we expect that this observer is called after this event handler finishedn
-      array0.insert(1, [1]);
-      vals.push(0);
-    } else {
-      // this should be called the second time an element is inserted (above case)
-      vals.push(1);
-    }
-  });
-  array0.insert(0, [0]);
-  compareArrays(vals, [0, 1]);
-  compareArrays(array0.toArray(), [0, 1]);
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testInsertAndDeleteEventsForTypes = tc => {
-  const { array0, users } = init(tc, { users: 2 });
-  /**
-   * @type {Object<string,any>|null}
-   */
-  let event = null;
-  array0.observe(e => {
-    event = e;
-  });
-  array0.insert(0, [new YArray()]);
-  assert(event !== null);
-  event = null;
-  array0.delete(0);
-  assert(event !== null);
-  event = null;
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testChangeEvent = tc => {
-  const { array0, users } = init(tc, { users: 2 });
-  /**
-   * @type {any}
-   */
-  let changes = null;
-  array0.observe(e => {
-    changes = e.changes;
-  });
-  const newArr = new YArray();
-  array0.insert(0, [newArr, 4, 'dtrn']);
-  assert(changes !== null && changes.added.size === 2 && changes.deleted.size === 0);
-  compare(changes.delta, [{ insert: [newArr, 4, 'dtrn'] }]);
-  changes = null;
-  array0.delete(0, 2);
-  assert(changes !== null && changes.added.size === 0 && changes.deleted.size === 2);
-  compare(changes.delta, [{ delete: 2 }]);
-  changes = null;
-  array0.insert(1, [0.1]);
-  assert(changes !== null && changes.added.size === 1 && changes.deleted.size === 0);
-  compare(changes.delta, [{ retain: 1 }, { insert: [0.1] }]);
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testInsertAndDeleteEventsForTypes2 = tc => {
-  const { array0, users } = init(tc, { users: 2 });
-  /**
-   * @type {Array<Object<string,any>>}
-   */
-  const events = [];
-  array0.observe(e => {
-    events.push(e);
-  });
-  array0.insert(0, ['hi', new YMap()]);
-  assert(events.length === 1, 'Event is triggered exactly once for insertion of two elements');
-  array0.delete(1);
-  assert(events.length === 2, 'Event is triggered exactly once for deletion');
-  compare$1(users);
-};
-
-/**
- * This issue has been reported here https://github.com/yjs/yjs/issues/155
- * @param {t.TestCase} tc
- */
-const testNewChildDoesNotEmitEventInTransaction = tc => {
-  const { array0, users } = init(tc, { users: 2 });
-  let fired = false;
-  users[0].transact(() => {
-    const newMap = new YMap();
-    newMap.observe(() => {
-      fired = true;
-    });
-    array0.insert(0, [newMap]);
-    newMap.set('tst', 42);
-  });
-  assert(!fired, 'Event does not trigger');
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testGarbageCollector = tc => {
-  const { testConnector, users, array0 } = init(tc, { users: 3 });
-  array0.insert(0, ['x', 'y', 'z']);
-  testConnector.flushAllMessages();
-  users[0].disconnect();
-  array0.delete(0, 3);
-  users[0].connect();
-  testConnector.flushAllMessages();
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testEventTargetIsSetCorrectlyOnLocal = tc => {
-  const { array0, users } = init(tc, { users: 3 });
-  /**
-   * @type {any}
-   */
-  let event;
-  array0.observe(e => {
-    event = e;
-  });
-  array0.insert(0, ['stuff']);
-  assert(event.target === array0, '"target" property is set correctly');
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testEventTargetIsSetCorrectlyOnRemote = tc => {
-  const { testConnector, array0, array1, users } = init(tc, { users: 3 });
-  /**
-   * @type {any}
-   */
-  let event;
-  array0.observe(e => {
-    event = e;
-  });
-  array1.insert(0, ['stuff']);
-  testConnector.flushAllMessages();
-  assert(event.target === array0, '"target" property is set correctly');
-  compare$1(users);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testIteratingArrayContainingTypes = tc => {
-  const y = new Doc();
-  const arr = y.getArray('arr');
-  const numItems = 10;
-  for (let i = 0; i < numItems; i++) {
-    const map = new YMap();
-    map.set('value', i);
-    arr.push([map]);
-  }
-  let cnt = 0;
-  for (const item of arr) {
-    assert(item.get('value') === cnt++, 'value is correct');
-  }
-  y.destroy();
-};
-
-let _uniqueNumber = 0;
-const getUniqueNumber = () => _uniqueNumber++;
-
-/**
- * @type {Array<function(Doc,prng.PRNG,any):void>}
- */
-const arrayTransactions = [
-  function insert (user, gen) {
-    const yarray = user.getArray('array');
-    var uniqueNumber = getUniqueNumber();
-    var content = [];
-    var len = int31(gen, 1, 4);
-    for (var i = 0; i < len; i++) {
-      content.push(uniqueNumber);
-    }
-    var pos = int31(gen, 0, yarray.length);
-    yarray.insert(pos, content);
-  },
-  function insertTypeArray (user, gen) {
-    const yarray = user.getArray('array');
-    var pos = int31(gen, 0, yarray.length);
-    yarray.insert(pos, [new YArray()]);
-    var array2 = yarray.get(pos);
-    array2.insert(0, [1, 2, 3, 4]);
-  },
-  function insertTypeMap (user, gen) {
-    const yarray = user.getArray('array');
-    var pos = int31(gen, 0, yarray.length);
-    yarray.insert(pos, [new YMap()]);
-    var map = yarray.get(pos);
-    map.set('someprop', 42);
-    map.set('someprop', 43);
-    map.set('someprop', 44);
-  },
-  function _delete (user, gen) {
-    const yarray = user.getArray('array');
-    var length = yarray.length;
-    if (length > 0) {
-      var somePos = int31(gen, 0, length - 1);
-      var delLength = int31(gen, 1, min(2, length - somePos));
-      if (bool(gen)) {
-        var type = yarray.get(somePos);
-        if (type.length > 0) {
-          somePos = int31(gen, 0, type.length - 1);
-          delLength = int31(gen, 0, min(2, type.length - somePos));
-          type.delete(somePos, delLength);
-        }
-      } else {
-        yarray.delete(somePos, delLength);
-      }
-    }
-  }
-];
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests4 = tc => {
-  applyRandomTests(tc, arrayTransactions, 4);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests40 = tc => {
-  applyRandomTests(tc, arrayTransactions, 40);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests42 = tc => {
-  applyRandomTests(tc, arrayTransactions, 42);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests43 = tc => {
-  applyRandomTests(tc, arrayTransactions, 43);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests44 = tc => {
-  applyRandomTests(tc, arrayTransactions, 44);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests45 = tc => {
-  applyRandomTests(tc, arrayTransactions, 45);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests46 = tc => {
-  applyRandomTests(tc, arrayTransactions, 46);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests300 = tc => {
-  applyRandomTests(tc, arrayTransactions, 300);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests400 = tc => {
-  applyRandomTests(tc, arrayTransactions, 400);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests500 = tc => {
-  applyRandomTests(tc, arrayTransactions, 500);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests600 = tc => {
-  applyRandomTests(tc, arrayTransactions, 600);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests1000 = tc => {
-  applyRandomTests(tc, arrayTransactions, 1000);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests1800 = tc => {
-  applyRandomTests(tc, arrayTransactions, 1800);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests3000 = tc => {
-  skip(!production);
-  applyRandomTests(tc, arrayTransactions, 3000);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests5000 = tc => {
-  skip(!production);
-  applyRandomTests(tc, arrayTransactions, 5000);
-};
-
-/**
- * @param {t.TestCase} tc
- */
-const testRepeatGeneratingYarrayTests30000 = tc => {
-  skip(!production);
-  applyRandomTests(tc, arrayTransactions, 30000);
-};
-
-var array = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  testDeleteInsert: testDeleteInsert,
-  testInsertThreeElementsTryRegetProperty: testInsertThreeElementsTryRegetProperty,
-  testConcurrentInsertWithThreeConflicts: testConcurrentInsertWithThreeConflicts,
-  testConcurrentInsertDeleteWithThreeConflicts: testConcurrentInsertDeleteWithThreeConflicts,
-  testInsertionsInLateSync: testInsertionsInLateSync,
-  testDisconnectReallyPreventsSendingMessages: testDisconnectReallyPreventsSendingMessages,
-  testDeletionsInLateSync: testDeletionsInLateSync,
-  testInsertThenMergeDeleteOnSync: testInsertThenMergeDeleteOnSync,
-  testInsertAndDeleteEvents: testInsertAndDeleteEvents,
-  testNestedObserverEvents: testNestedObserverEvents,
-  testInsertAndDeleteEventsForTypes: testInsertAndDeleteEventsForTypes,
-  testChangeEvent: testChangeEvent,
-  testInsertAndDeleteEventsForTypes2: testInsertAndDeleteEventsForTypes2,
-  testNewChildDoesNotEmitEventInTransaction: testNewChildDoesNotEmitEventInTransaction,
-  testGarbageCollector: testGarbageCollector,
-  testEventTargetIsSetCorrectlyOnLocal: testEventTargetIsSetCorrectlyOnLocal,
-  testEventTargetIsSetCorrectlyOnRemote: testEventTargetIsSetCorrectlyOnRemote,
-  testIteratingArrayContainingTypes: testIteratingArrayContainingTypes,
-  testRepeatGeneratingYarrayTests4: testRepeatGeneratingYarrayTests4,
-  testRepeatGeneratingYarrayTests40: testRepeatGeneratingYarrayTests40,
-  testRepeatGeneratingYarrayTests42: testRepeatGeneratingYarrayTests42,
-  testRepeatGeneratingYarrayTests43: testRepeatGeneratingYarrayTests43,
-  testRepeatGeneratingYarrayTests44: testRepeatGeneratingYarrayTests44,
-  testRepeatGeneratingYarrayTests45: testRepeatGeneratingYarrayTests45,
-  testRepeatGeneratingYarrayTests46: testRepeatGeneratingYarrayTests46,
-  testRepeatGeneratingYarrayTests300: testRepeatGeneratingYarrayTests300,
-  testRepeatGeneratingYarrayTests400: testRepeatGeneratingYarrayTests400,
-  testRepeatGeneratingYarrayTests500: testRepeatGeneratingYarrayTests500,
-  testRepeatGeneratingYarrayTests600: testRepeatGeneratingYarrayTests600,
-  testRepeatGeneratingYarrayTests1000: testRepeatGeneratingYarrayTests1000,
-  testRepeatGeneratingYarrayTests1800: testRepeatGeneratingYarrayTests1800,
-  testRepeatGeneratingYarrayTests3000: testRepeatGeneratingYarrayTests3000,
-  testRepeatGeneratingYarrayTests5000: testRepeatGeneratingYarrayTests5000,
-  testRepeatGeneratingYarrayTests30000: testRepeatGeneratingYarrayTests30000
+  AbstractContent: AbstractContent
 });
 
 /**
@@ -11508,7 +12951,7 @@ const testThrowsAddAndUpdateAndDeleteEvents = tc => {
 /**
  * @param {t.TestCase} tc
  */
-const testChangeEvent$1 = tc => {
+const testChangeEvent = tc => {
   const { map0, users } = init(tc, { users: 2 });
   /**
    * @type {any}
@@ -11794,7 +13237,7 @@ var map$2 = /*#__PURE__*/Object.freeze({
   testObserveDeepProperties: testObserveDeepProperties,
   testObserversUsingObservedeep: testObserversUsingObservedeep,
   testThrowsAddAndUpdateAndDeleteEvents: testThrowsAddAndUpdateAndDeleteEvents,
-  testChangeEvent: testChangeEvent$1,
+  testChangeEvent: testChangeEvent,
   testYmapEventExceptionsShouldCompleteTransaction: testYmapEventExceptionsShouldCompleteTransaction,
   testYmapEventHasCorrectValueWhenSettingAPrimitive: testYmapEventHasCorrectValueWhenSettingAPrimitive,
   testYmapEventHasCorrectValueWhenSettingAPrimitiveFromOtherUser: testYmapEventHasCorrectValueWhenSettingAPrimitiveFromOtherUser,
@@ -11816,7 +13259,552 @@ var map$2 = /*#__PURE__*/Object.freeze({
   testRepeatGeneratingYmapTests100000: testRepeatGeneratingYmapTests100000
 });
 
-const { init: init$1, compare: compare$2 } = Y;
+/**
+ * @param {t.TestCase} tc
+ */
+const testBasicUpdate = tc => {
+  const doc1 = new Doc();
+  const doc2 = new Doc();
+  doc1.getArray('array').insert(0, ['hi']);
+  const update = encodeStateAsUpdate(doc1);
+  applyUpdate(doc2, update);
+  compare(doc2.getArray('array').toArray(), ['hi']);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testDeleteInsert = tc => {
+  const { users, array0 } = init(tc, { users: 2 });
+  array0.delete(0, 0);
+  describe('Does not throw when deleting zero elements with position 0');
+  fails(() => {
+    array0.delete(1, 1);
+  });
+  array0.insert(0, ['A']);
+  array0.delete(1, 0);
+  describe('Does not throw when deleting zero elements with valid position 1');
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testInsertThreeElementsTryRegetProperty = tc => {
+  const { testConnector, users, array0, array1 } = init(tc, { users: 2 });
+  array0.insert(0, [1, true, false]);
+  compare(array0.toJSON(), [1, true, false], '.toJSON() works');
+  testConnector.flushAllMessages();
+  compare(array1.toJSON(), [1, true, false], '.toJSON() works after sync');
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testConcurrentInsertWithThreeConflicts = tc => {
+  var { users, array0, array1, array2 } = init(tc, { users: 3 });
+  array0.insert(0, [0]);
+  array1.insert(0, [1]);
+  array2.insert(0, [2]);
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testConcurrentInsertDeleteWithThreeConflicts = tc => {
+  const { testConnector, users, array0, array1, array2 } = init(tc, { users: 3 });
+  array0.insert(0, ['x', 'y', 'z']);
+  testConnector.flushAllMessages();
+  array0.insert(1, [0]);
+  array1.delete(0);
+  array1.delete(1, 1);
+  array2.insert(1, [2]);
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testInsertionsInLateSync = tc => {
+  const { testConnector, users, array0, array1, array2 } = init(tc, { users: 3 });
+  array0.insert(0, ['x', 'y']);
+  testConnector.flushAllMessages();
+  users[1].disconnect();
+  users[2].disconnect();
+  array0.insert(1, ['user0']);
+  array1.insert(1, ['user1']);
+  array2.insert(1, ['user2']);
+  users[1].connect();
+  users[2].connect();
+  testConnector.flushAllMessages();
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testDisconnectReallyPreventsSendingMessages = tc => {
+  var { testConnector, users, array0, array1 } = init(tc, { users: 3 });
+  array0.insert(0, ['x', 'y']);
+  testConnector.flushAllMessages();
+  users[1].disconnect();
+  users[2].disconnect();
+  array0.insert(1, ['user0']);
+  array1.insert(1, ['user1']);
+  compare(array0.toJSON(), ['x', 'user0', 'y']);
+  compare(array1.toJSON(), ['x', 'user1', 'y']);
+  users[1].connect();
+  users[2].connect();
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testDeletionsInLateSync = tc => {
+  const { testConnector, users, array0, array1 } = init(tc, { users: 2 });
+  array0.insert(0, ['x', 'y']);
+  testConnector.flushAllMessages();
+  users[1].disconnect();
+  array1.delete(1, 1);
+  array0.delete(0, 2);
+  users[1].connect();
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testInsertThenMergeDeleteOnSync = tc => {
+  const { testConnector, users, array0, array1 } = init(tc, { users: 2 });
+  array0.insert(0, ['x', 'y', 'z']);
+  testConnector.flushAllMessages();
+  users[0].disconnect();
+  array1.delete(0, 3);
+  users[0].connect();
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testInsertAndDeleteEvents = tc => {
+  const { array0, users } = init(tc, { users: 2 });
+  /**
+   * @type {Object<string,any>?}
+   */
+  let event = null;
+  array0.observe(e => {
+    event = e;
+  });
+  array0.insert(0, [0, 1, 2]);
+  assert(event !== null);
+  event = null;
+  array0.delete(0);
+  assert(event !== null);
+  event = null;
+  array0.delete(0, 2);
+  assert(event !== null);
+  event = null;
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testNestedObserverEvents = tc => {
+  const { array0, users } = init(tc, { users: 2 });
+  /**
+   * @type {Array<number>}
+   */
+  const vals = [];
+  array0.observe(e => {
+    if (array0.length === 1) {
+      // inserting, will call this observer again
+      // we expect that this observer is called after this event handler finishedn
+      array0.insert(1, [1]);
+      vals.push(0);
+    } else {
+      // this should be called the second time an element is inserted (above case)
+      vals.push(1);
+    }
+  });
+  array0.insert(0, [0]);
+  compareArrays(vals, [0, 1]);
+  compareArrays(array0.toArray(), [0, 1]);
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testInsertAndDeleteEventsForTypes = tc => {
+  const { array0, users } = init(tc, { users: 2 });
+  /**
+   * @type {Object<string,any>|null}
+   */
+  let event = null;
+  array0.observe(e => {
+    event = e;
+  });
+  array0.insert(0, [new YArray()]);
+  assert(event !== null);
+  event = null;
+  array0.delete(0);
+  assert(event !== null);
+  event = null;
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testChangeEvent$1 = tc => {
+  const { array0, users } = init(tc, { users: 2 });
+  /**
+   * @type {any}
+   */
+  let changes = null;
+  array0.observe(e => {
+    changes = e.changes;
+  });
+  const newArr = new YArray();
+  array0.insert(0, [newArr, 4, 'dtrn']);
+  assert(changes !== null && changes.added.size === 2 && changes.deleted.size === 0);
+  compare(changes.delta, [{ insert: [newArr, 4, 'dtrn'] }]);
+  changes = null;
+  array0.delete(0, 2);
+  assert(changes !== null && changes.added.size === 0 && changes.deleted.size === 2);
+  compare(changes.delta, [{ delete: 2 }]);
+  changes = null;
+  array0.insert(1, [0.1]);
+  assert(changes !== null && changes.added.size === 1 && changes.deleted.size === 0);
+  compare(changes.delta, [{ retain: 1 }, { insert: [0.1] }]);
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testInsertAndDeleteEventsForTypes2 = tc => {
+  const { array0, users } = init(tc, { users: 2 });
+  /**
+   * @type {Array<Object<string,any>>}
+   */
+  const events = [];
+  array0.observe(e => {
+    events.push(e);
+  });
+  array0.insert(0, ['hi', new YMap()]);
+  assert(events.length === 1, 'Event is triggered exactly once for insertion of two elements');
+  array0.delete(1);
+  assert(events.length === 2, 'Event is triggered exactly once for deletion');
+  compare$1(users);
+};
+
+/**
+ * This issue has been reported here https://github.com/yjs/yjs/issues/155
+ * @param {t.TestCase} tc
+ */
+const testNewChildDoesNotEmitEventInTransaction = tc => {
+  const { array0, users } = init(tc, { users: 2 });
+  let fired = false;
+  users[0].transact(() => {
+    const newMap = new YMap();
+    newMap.observe(() => {
+      fired = true;
+    });
+    array0.insert(0, [newMap]);
+    newMap.set('tst', 42);
+  });
+  assert(!fired, 'Event does not trigger');
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testGarbageCollector = tc => {
+  const { testConnector, users, array0 } = init(tc, { users: 3 });
+  array0.insert(0, ['x', 'y', 'z']);
+  testConnector.flushAllMessages();
+  users[0].disconnect();
+  array0.delete(0, 3);
+  users[0].connect();
+  testConnector.flushAllMessages();
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testEventTargetIsSetCorrectlyOnLocal = tc => {
+  const { array0, users } = init(tc, { users: 3 });
+  /**
+   * @type {any}
+   */
+  let event;
+  array0.observe(e => {
+    event = e;
+  });
+  array0.insert(0, ['stuff']);
+  assert(event.target === array0, '"target" property is set correctly');
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testEventTargetIsSetCorrectlyOnRemote = tc => {
+  const { testConnector, array0, array1, users } = init(tc, { users: 3 });
+  /**
+   * @type {any}
+   */
+  let event;
+  array0.observe(e => {
+    event = e;
+  });
+  array1.insert(0, ['stuff']);
+  testConnector.flushAllMessages();
+  assert(event.target === array0, '"target" property is set correctly');
+  compare$1(users);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testIteratingArrayContainingTypes = tc => {
+  const y = new Doc();
+  const arr = y.getArray('arr');
+  const numItems = 10;
+  for (let i = 0; i < numItems; i++) {
+    const map = new YMap();
+    map.set('value', i);
+    arr.push([map]);
+  }
+  let cnt = 0;
+  for (const item of arr) {
+    assert(item.get('value') === cnt++, 'value is correct');
+  }
+  y.destroy();
+};
+
+let _uniqueNumber = 0;
+const getUniqueNumber = () => _uniqueNumber++;
+
+/**
+ * @type {Array<function(Doc,prng.PRNG,any):void>}
+ */
+const arrayTransactions = [
+  function insert (user, gen) {
+    const yarray = user.getArray('array');
+    var uniqueNumber = getUniqueNumber();
+    var content = [];
+    var len = int32(gen, 1, 4);
+    for (var i = 0; i < len; i++) {
+      content.push(uniqueNumber);
+    }
+    var pos = int32(gen, 0, yarray.length);
+    const oldContent = yarray.toArray();
+    yarray.insert(pos, content);
+    oldContent.splice(pos, 0, ...content);
+    compareArrays(yarray.toArray(), oldContent); // we want to make sure that fastSearch markers insert at the correct position
+  },
+  function insertTypeArray (user, gen) {
+    const yarray = user.getArray('array');
+    var pos = int32(gen, 0, yarray.length);
+    yarray.insert(pos, [new YArray()]);
+    var array2 = yarray.get(pos);
+    array2.insert(0, [1, 2, 3, 4]);
+  },
+  function insertTypeMap (user, gen) {
+    const yarray = user.getArray('array');
+    var pos = int32(gen, 0, yarray.length);
+    yarray.insert(pos, [new YMap()]);
+    var map = yarray.get(pos);
+    map.set('someprop', 42);
+    map.set('someprop', 43);
+    map.set('someprop', 44);
+  },
+  function _delete (user, gen) {
+    const yarray = user.getArray('array');
+    var length = yarray.length;
+    if (length > 0) {
+      var somePos = int32(gen, 0, length - 1);
+      var delLength = int32(gen, 1, min(2, length - somePos));
+      if (bool(gen)) {
+        var type = yarray.get(somePos);
+        if (type.length > 0) {
+          somePos = int32(gen, 0, type.length - 1);
+          delLength = int32(gen, 0, min(2, type.length - somePos));
+          type.delete(somePos, delLength);
+        }
+      } else {
+        const oldContent = yarray.toArray();
+        yarray.delete(somePos, delLength);
+        oldContent.splice(somePos, delLength);
+        compareArrays(yarray.toArray(), oldContent);
+      }
+    }
+  }
+];
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests6 = tc => {
+  applyRandomTests(tc, arrayTransactions, 6);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests40 = tc => {
+  applyRandomTests(tc, arrayTransactions, 40);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests42 = tc => {
+  applyRandomTests(tc, arrayTransactions, 42);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests43 = tc => {
+  applyRandomTests(tc, arrayTransactions, 43);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests44 = tc => {
+  applyRandomTests(tc, arrayTransactions, 44);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests45 = tc => {
+  applyRandomTests(tc, arrayTransactions, 45);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests46 = tc => {
+  applyRandomTests(tc, arrayTransactions, 46);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests300 = tc => {
+  applyRandomTests(tc, arrayTransactions, 300);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests400 = tc => {
+  applyRandomTests(tc, arrayTransactions, 400);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests500 = tc => {
+  applyRandomTests(tc, arrayTransactions, 500);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests600 = tc => {
+  applyRandomTests(tc, arrayTransactions, 600);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests1000 = tc => {
+  applyRandomTests(tc, arrayTransactions, 1000);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests1800 = tc => {
+  applyRandomTests(tc, arrayTransactions, 1800);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests3000 = tc => {
+  skip(!production);
+  applyRandomTests(tc, arrayTransactions, 3000);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests5000 = tc => {
+  skip(!production);
+  applyRandomTests(tc, arrayTransactions, 5000);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGeneratingYarrayTests30000 = tc => {
+  skip(!production);
+  applyRandomTests(tc, arrayTransactions, 30000);
+};
+
+var array = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  testBasicUpdate: testBasicUpdate,
+  testDeleteInsert: testDeleteInsert,
+  testInsertThreeElementsTryRegetProperty: testInsertThreeElementsTryRegetProperty,
+  testConcurrentInsertWithThreeConflicts: testConcurrentInsertWithThreeConflicts,
+  testConcurrentInsertDeleteWithThreeConflicts: testConcurrentInsertDeleteWithThreeConflicts,
+  testInsertionsInLateSync: testInsertionsInLateSync,
+  testDisconnectReallyPreventsSendingMessages: testDisconnectReallyPreventsSendingMessages,
+  testDeletionsInLateSync: testDeletionsInLateSync,
+  testInsertThenMergeDeleteOnSync: testInsertThenMergeDeleteOnSync,
+  testInsertAndDeleteEvents: testInsertAndDeleteEvents,
+  testNestedObserverEvents: testNestedObserverEvents,
+  testInsertAndDeleteEventsForTypes: testInsertAndDeleteEventsForTypes,
+  testChangeEvent: testChangeEvent$1,
+  testInsertAndDeleteEventsForTypes2: testInsertAndDeleteEventsForTypes2,
+  testNewChildDoesNotEmitEventInTransaction: testNewChildDoesNotEmitEventInTransaction,
+  testGarbageCollector: testGarbageCollector,
+  testEventTargetIsSetCorrectlyOnLocal: testEventTargetIsSetCorrectlyOnLocal,
+  testEventTargetIsSetCorrectlyOnRemote: testEventTargetIsSetCorrectlyOnRemote,
+  testIteratingArrayContainingTypes: testIteratingArrayContainingTypes,
+  testRepeatGeneratingYarrayTests6: testRepeatGeneratingYarrayTests6,
+  testRepeatGeneratingYarrayTests40: testRepeatGeneratingYarrayTests40,
+  testRepeatGeneratingYarrayTests42: testRepeatGeneratingYarrayTests42,
+  testRepeatGeneratingYarrayTests43: testRepeatGeneratingYarrayTests43,
+  testRepeatGeneratingYarrayTests44: testRepeatGeneratingYarrayTests44,
+  testRepeatGeneratingYarrayTests45: testRepeatGeneratingYarrayTests45,
+  testRepeatGeneratingYarrayTests46: testRepeatGeneratingYarrayTests46,
+  testRepeatGeneratingYarrayTests300: testRepeatGeneratingYarrayTests300,
+  testRepeatGeneratingYarrayTests400: testRepeatGeneratingYarrayTests400,
+  testRepeatGeneratingYarrayTests500: testRepeatGeneratingYarrayTests500,
+  testRepeatGeneratingYarrayTests600: testRepeatGeneratingYarrayTests600,
+  testRepeatGeneratingYarrayTests1000: testRepeatGeneratingYarrayTests1000,
+  testRepeatGeneratingYarrayTests1800: testRepeatGeneratingYarrayTests1800,
+  testRepeatGeneratingYarrayTests3000: testRepeatGeneratingYarrayTests3000,
+  testRepeatGeneratingYarrayTests5000: testRepeatGeneratingYarrayTests5000,
+  testRepeatGeneratingYarrayTests30000: testRepeatGeneratingYarrayTests30000
+});
+
+const { init: init$1, compare: compare$2 } = Y$1;
 
 /**
  * @param {t.TestCase} tc
@@ -12018,6 +14006,84 @@ const testFormattingRemovedInMidText = tc => {
   assert(getTypeChildren(text0).length === 3);
 };
 
+/**
+ * @param {t.TestCase} tc
+ */
+const testInsertAndDeleteAtRandomPositions = tc => {
+  const N = 100000;
+  const { text0 } = init$1(tc, { users: 1 });
+  const gen = tc.prng;
+
+  // create initial content
+  // let expectedResult = init
+  text0.insert(0, word(gen, N / 2, N / 2));
+
+  // apply changes
+  for (let i = 0; i < N; i++) {
+    const pos = uint32$1(gen, 0, text0.length);
+    if (bool(gen)) {
+      const len = uint32$1(gen, 1, 5);
+      const word$1 = word(gen, 0, len);
+      text0.insert(pos, word$1);
+      // expectedResult = expectedResult.slice(0, pos) + word + expectedResult.slice(pos)
+    } else {
+      const len = uint32$1(gen, 0, min(3, text0.length - pos));
+      text0.delete(pos, len);
+      // expectedResult = expectedResult.slice(0, pos) + expectedResult.slice(pos + len)
+    }
+  }
+  // t.compareStrings(text0.toString(), expectedResult)
+  describe('final length', '' + text0.length);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testAppendChars = tc => {
+  const N = 10000;
+  const { text0 } = init$1(tc, { users: 1 });
+
+  // apply changes
+  for (let i = 0; i < N; i++) {
+    text0.insert(text0.length, 'a');
+  }
+  assert(text0.length === N);
+};
+
+const id = createID(0, 0);
+const c = new ContentString('a');
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testBestCase = tc => {
+  const N = 2000000;
+  const items = new Array(N);
+  measureTime('time to create two million items in the best case', () => {
+    const parent = /** @type {any} */ ({});
+    let prevItem = null;
+    for (let i = 0; i < N; i++) {
+      /**
+       * @type {Y.Item}
+       */
+      const n = new Item(createID(0, 0), null, null, null, null, null, null, c);
+      // items.push(n)
+      items[i] = n;
+      n.right = prevItem;
+      n.rightOrigin = prevItem ? id : null;
+      n.content = c;
+      n.parent = parent;
+      prevItem = n;
+    }
+  });
+  const newArray = new Array(N);
+  measureTime('time to copy two million items to new Array', () => {
+    for (let i = 0; i < N; i++) {
+      newArray[i] = items[i];
+    }
+  });
+};
+
 const tryGc$1 = () => {
   if (typeof global !== 'undefined' && global.gc) {
     global.gc();
@@ -12043,14 +14109,15 @@ const testLargeFragmentedDocument = tc => {
     });
     tryGc$1();
     measureTime('time to encode document', () => {
-      update = encodeStateAsUpdate(doc1);
+      update = encodeStateAsUpdateV2(doc1);
     });
+    describe('Document size:', update.byteLength);
   })()
   ;(() => {
     const doc2 = new Doc();
     tryGc$1();
     measureTime(`time to apply ${itemsToInsert} updates`, () => {
-      applyUpdate(doc2, update);
+      applyUpdateV2(doc2, update);
     });
   })();
 };
@@ -12058,6 +14125,102 @@ const testLargeFragmentedDocument = tc => {
 // RANDOM TESTS
 
 let charCounter = 0;
+
+/**
+ * Random tests for pure text operations without formatting.
+ *
+ * @type Array<function(any,prng.PRNG):void>
+ */
+const textChanges = [
+  /**
+   * @param {Y.Doc} y
+   * @param {prng.PRNG} gen
+   */
+  (y, gen) => { // insert text
+    const ytext = y.getText('text');
+    const insertPos = int32(gen, 0, ytext.length);
+    const text = charCounter++ + word(gen);
+    const prevText = ytext.toString();
+    ytext.insert(insertPos, text);
+    compareStrings(ytext.toString(), prevText.slice(0, insertPos) + text + prevText.slice(insertPos));
+  },
+  /**
+   * @param {Y.Doc} y
+   * @param {prng.PRNG} gen
+   */
+  (y, gen) => { // delete text
+    const ytext = y.getText('text');
+    const contentLen = ytext.toString().length;
+    const insertPos = int32(gen, 0, contentLen);
+    const overwrite = min(int32(gen, 0, contentLen - insertPos), 2);
+    const prevText = ytext.toString();
+    ytext.delete(insertPos, overwrite);
+    compareStrings(ytext.toString(), prevText.slice(0, insertPos) + prevText.slice(insertPos + overwrite));
+  }
+];
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGenerateTextChanges5 = tc => {
+  const { users } = checkResult(applyRandomTests(tc, textChanges, 5));
+  const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+  assert(cleanups === 0);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGenerateTextChanges30 = tc => {
+  const { users } = checkResult(applyRandomTests(tc, textChanges, 30));
+  const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+  assert(cleanups === 0);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGenerateTextChanges40 = tc => {
+  const { users } = checkResult(applyRandomTests(tc, textChanges, 40));
+  const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+  assert(cleanups === 0);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGenerateTextChanges50 = tc => {
+  const { users } = checkResult(applyRandomTests(tc, textChanges, 50));
+  const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+  assert(cleanups === 0);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGenerateTextChanges70 = tc => {
+  const { users } = checkResult(applyRandomTests(tc, textChanges, 70));
+  const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+  assert(cleanups === 0);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGenerateTextChanges90 = tc => {
+  const { users } = checkResult(applyRandomTests(tc, textChanges, 90));
+  const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+  assert(cleanups === 0);
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testRepeatGenerateTextChanges300 = tc => {
+  const { users } = checkResult(applyRandomTests(tc, textChanges, 300));
+  const cleanups = cleanupYTextFormatting(users[0].getText('text'));
+  assert(cleanups === 0);
+};
 
 const marks = [
   { bold: true },
@@ -12071,6 +14234,8 @@ const marksChoices = [
 ];
 
 /**
+ * Random tests for all features of y-text (formatting, embeds, ..).
+ *
  * @type Array<function(any,prng.PRNG):void>
  */
 const qChanges = [
@@ -12080,7 +14245,7 @@ const qChanges = [
    */
   (y, gen) => { // insert text
     const ytext = y.getText('text');
-    const insertPos = int32(gen, 0, ytext.toString().length);
+    const insertPos = int32(gen, 0, ytext.length);
     const attrs = oneOf(gen, marksChoices);
     const text = charCounter++ + word(gen);
     ytext.insert(insertPos, text, attrs);
@@ -12091,7 +14256,7 @@ const qChanges = [
    */
   (y, gen) => { // insert embed
     const ytext = y.getText('text');
-    const insertPos = int32(gen, 0, ytext.toString().length);
+    const insertPos = int32(gen, 0, ytext.length);
     ytext.insertEmbed(insertPos, { image: 'https://user-images.githubusercontent.com/5553757/48975307-61efb100-f06d-11e8-9177-ee895e5916e5.png' });
   },
   /**
@@ -12232,7 +14397,17 @@ var text$1 = /*#__PURE__*/Object.freeze({
   testToDeltaEmbedNoAttributes: testToDeltaEmbedNoAttributes,
   testFormattingRemoved: testFormattingRemoved,
   testFormattingRemovedInMidText: testFormattingRemovedInMidText,
+  testInsertAndDeleteAtRandomPositions: testInsertAndDeleteAtRandomPositions,
+  testAppendChars: testAppendChars,
+  testBestCase: testBestCase,
   testLargeFragmentedDocument: testLargeFragmentedDocument,
+  testRepeatGenerateTextChanges5: testRepeatGenerateTextChanges5,
+  testRepeatGenerateTextChanges30: testRepeatGenerateTextChanges30,
+  testRepeatGenerateTextChanges40: testRepeatGenerateTextChanges40,
+  testRepeatGenerateTextChanges50: testRepeatGenerateTextChanges50,
+  testRepeatGenerateTextChanges70: testRepeatGenerateTextChanges70,
+  testRepeatGenerateTextChanges90: testRepeatGenerateTextChanges90,
+  testRepeatGenerateTextChanges300: testRepeatGenerateTextChanges300,
   testRepeatGenerateQuillChanges1: testRepeatGenerateQuillChanges1,
   testRepeatGenerateQuillChanges2: testRepeatGenerateQuillChanges2,
   testRepeatGenerateQuillChanges2Repeat: testRepeatGenerateQuillChanges2Repeat,
@@ -12652,16 +14827,58 @@ const testClientIdDuplicateChange = tc => {
   assert(doc2.clientID !== doc1.clientID);
 };
 
-var consistency = /*#__PURE__*/Object.freeze({
+/**
+ * @param {t.TestCase} tc
+ */
+const testGetTypeEmptyId = tc => {
+  const doc1 = new Doc();
+  doc1.getText('').insert(0, 'h');
+  doc1.getText().insert(1, 'i');
+  const doc2 = new Doc();
+  applyUpdate(doc2, encodeStateAsUpdate(doc1));
+  assert(doc2.getText().toString() === 'hi');
+  assert(doc2.getText('').toString() === 'hi');
+};
+
+/**
+ * @param {t.TestCase} tc
+ */
+const testToJSON = tc => {
+  const doc = new Doc();
+  compare(doc.toJSON(), {}, 'doc.toJSON yields empty object');
+
+  const arr = doc.getArray('array');
+  arr.push(['test1']);
+
+  const map = doc.getMap('map');
+  map.set('k1', 'v1');
+  const map2 = new YMap();
+  map.set('k2', map2);
+  map2.set('m2k1', 'm2v1');
+
+  compare(doc.toJSON(), {
+    array: ['test1'],
+    map: {
+      k1: 'v1',
+      k2: {
+        m2k1: 'm2v1'
+      }
+    }
+  }, 'doc.toJSON has array and recursive map');
+};
+
+var doc$1 = /*#__PURE__*/Object.freeze({
   __proto__: null,
-  testClientIdDuplicateChange: testClientIdDuplicateChange
+  testClientIdDuplicateChange: testClientIdDuplicateChange,
+  testGetTypeEmptyId: testGetTypeEmptyId,
+  testToJSON: testToJSON
 });
 
 if (isBrowser) {
   createVConsole(document.body);
 }
 runTests({
-  map: map$2, array, text: text$1, xml, consistency, encoding, undoredo, compatibility
+  doc: doc$1, map: map$2, array, text: text$1, xml, encoding, undoredo, compatibility
 }).then(success => {
   /* istanbul ignore next */
   if (isNode) {

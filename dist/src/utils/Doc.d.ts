@@ -10,8 +10,8 @@ export class Doc extends Observable<string> {
      * @param {function(Item):boolean} [conf.gcFilter] Will be called before an Item is garbage collected. Return false to keep the Item.
      */
     constructor({ gc, gcFilter }?: {
-        gc?: boolean;
-        gcFilter?: (arg0: Item) => boolean;
+        gc: boolean;
+        gcFilter: (arg0: Item) => boolean;
     });
     gc: boolean;
     gcFilter: (arg0: Item) => boolean;
@@ -40,7 +40,7 @@ export class Doc extends Observable<string> {
      *
      * @public
      */
-    transact(f: (arg0: Transaction) => void, origin?: any): void;
+    public transact(f: (arg0: Transaction) => void, origin?: any): void;
     /**
      * Get a shared data type by name. If it does not yet exist, define its type.
      *
@@ -67,36 +67,44 @@ export class Doc extends Observable<string> {
      *
      * @public
      */
-    get(name: string, TypeConstructor?: Function): AbstractType<any>;
+    public get(name: string, TypeConstructor?: Function): AbstractType<any>;
     /**
      * @template T
-     * @param {string} name
+     * @param {string} [name]
      * @return {YArray<T>}
      *
      * @public
      */
-    getArray<T>(name: string): YArray<T>;
+    public getArray<T>(name?: string | undefined): YArray<T>;
     /**
-     * @param {string} name
+     * @param {string} [name]
      * @return {YText}
      *
      * @public
      */
-    getText(name: string): YText;
+    public getText(name?: string | undefined): YText;
     /**
-     * @param {string} name
+     * @param {string} [name]
      * @return {YMap<any>}
      *
      * @public
      */
-    getMap(name: string): YMap<any>;
+    public getMap(name?: string | undefined): YMap<any>;
     /**
-     * @param {string} name
+     * @param {string} [name]
      * @return {YXmlFragment}
      *
      * @public
      */
-    getXmlFragment(name: string): YXmlFragment;
+    public getXmlFragment(name?: string | undefined): YXmlFragment;
+    /**
+     * Converts the entire document into a js object, recursively traversing each yjs type
+     *
+     * @return {Object<string, any>}
+     */
+    toJSON(): {
+        [x: string]: any;
+    };
 }
 import * as random from "lib0/random";
 import { Observable } from "lib0/observable";

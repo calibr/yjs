@@ -11,10 +11,9 @@ import {
   Item,
   generateNewClientId,
   createID,
-  GC, StructStore, ID, AbstractType, AbstractStruct, YEvent, Doc // eslint-disable-line
+  AbstractUpdateEncoder, GC, StructStore, UpdateEncoderV2, DefaultUpdateEncoder, AbstractType, AbstractStruct, YEvent, Doc // eslint-disable-line
 } from '../internals.js'
 
-import * as encoding from 'lib0/encoding.js'
 import * as map from 'lib0/map.js'
 import * as math from 'lib0/math.js'
 import * as set from 'lib0/set.js'
@@ -107,17 +106,18 @@ export class Transaction {
 }
 
 /**
+ * @param {AbstractUpdateEncoder} encoder
  * @param {Transaction} transaction
+ * @return {boolean} Whether data was written.
  */
-export const computeUpdateMessageFromTransaction = transaction => {
+export const writeUpdateMessageFromTransaction = (encoder, transaction) => {
   if (transaction.deleteSet.clients.size === 0 && !map.any(transaction.afterState, (clock, client) => transaction.beforeState.get(client) !== clock)) {
-    return null
+    return false
   }
-  const encoder = encoding.createEncoder()
   sortAndMergeDeleteSet(transaction.deleteSet)
   writeStructsFromTransaction(encoder, transaction)
   writeDeleteSet(encoder, transaction.deleteSet)
-  return encoder
+  return true
 }
 
 /**
@@ -169,7 +169,7 @@ const tryToMergeWithLeft = (structs, pos) => {
  * @param {function(Item):boolean} gcFilter
  */
 const tryGcDeleteSet = (ds, store, gcFilter) => {
-  for (const [client, deleteItems] of ds.clients) {
+  for (const [client, deleteItems] of ds.clients.entries()) {
     const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client))
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di]
@@ -198,7 +198,7 @@ const tryGcDeleteSet = (ds, store, gcFilter) => {
 const tryMergeDeleteSet = (ds, store) => {
   // try to merge deleted / gc'd items
   // merge from right to left for better efficiecy and so we don't miss any merge targets
-  for (const [client, deleteItems] of ds.clients) {
+  ds.clients.forEach((deleteItems, client) => {
     const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client))
     for (let di = deleteItems.length - 1; di >= 0; di--) {
       const deleteItem = deleteItems[di]
@@ -212,7 +212,7 @@ const tryMergeDeleteSet = (ds, store) => {
         tryToMergeWithLeft(structs, si)
       }
     }
-  }
+  })
 }
 
 /**
@@ -290,7 +290,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
       tryMergeDeleteSet(ds, store)
 
       // on all affected store.clients props, try to merge
-      for (const [client, clock] of transaction.afterState) {
+      transaction.afterState.forEach((clock, client) => {
         const beforeClock = transaction.beforeState.get(client) || 0
         if (beforeClock !== clock) {
           const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client))
@@ -300,7 +300,7 @@ const cleanupTransactions = (transactionCleanups, i) => {
             tryToMergeWithLeft(structs, i)
           }
         }
-      }
+      })
       // try to merge mergeStructs
       // @todo: it makes more sense to transform mergeStructs to a DS, sort it, and merge from right to left
       //        but at the moment DS does not handle duplicates
@@ -322,9 +322,17 @@ const cleanupTransactions = (transactionCleanups, i) => {
       // @todo Merge all the transactions into one and provide send the data as a single update message
       doc.emit('afterTransactionCleanup', [transaction, doc])
       if (doc._observers.has('update')) {
-        const updateMessage = computeUpdateMessageFromTransaction(transaction)
-        if (updateMessage !== null) {
-          doc.emit('update', [encoding.toUint8Array(updateMessage), transaction.origin, doc])
+        const encoder = new DefaultUpdateEncoder()
+        const hasContent = writeUpdateMessageFromTransaction(encoder, transaction)
+        if (hasContent) {
+          doc.emit('update', [encoder.toUint8Array(), transaction.origin, doc])
+        }
+      }
+      if (doc._observers.has('updateV2')) {
+        const encoder = new UpdateEncoderV2()
+        const hasContent = writeUpdateMessageFromTransaction(encoder, transaction)
+        if (hasContent) {
+          doc.emit('updateV2', [encoder.toUint8Array(), transaction.origin, doc])
         }
       }
       if (transactionCleanups.length <= i + 1) {

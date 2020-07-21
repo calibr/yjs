@@ -1,11 +1,3 @@
-import * as Y from '../src/index.js'
-
-import {
-  createDeleteSetFromStructStore,
-  getStateVector,
-  Item,
-  DeleteItem, DeleteSet, StructStore, Doc // eslint-disable-line
-} from '../src/internals.js'
 
 import * as t from 'lib0/testing.js'
 import * as prng from 'lib0/prng.js'
@@ -13,7 +5,13 @@ import * as encoding from 'lib0/encoding.js'
 import * as decoding from 'lib0/decoding.js'
 import * as syncProtocol from 'y-protocols/sync.js'
 import * as object from 'lib0/object.js'
+import * as Y from '../src/internals.js'
 export * from '../src/internals.js'
+
+if (typeof window !== 'undefined') {
+  // @ts-ignore
+  window.Y = Y // eslint-disable-line
+}
 
 /**
  * @param {TestYInstance} y // publish message created by `y` to all other online clients
@@ -29,7 +27,7 @@ const broadcastMessage = (y, m) => {
   }
 }
 
-export class TestYInstance extends Doc {
+export class TestYInstance extends Y.Doc {
   /**
    * @param {TestConnector} testConnector
    * @param {number} clientID
@@ -230,7 +228,7 @@ export class TestConnector {
  * @param {t.TestCase} tc
  * @param {{users?:number}} conf
  * @param {InitTestObjectCallback<T>} [initTestObject]
- * @return {{testObjects:Array<any>,testConnector:TestConnector,users:Array<TestYInstance>,array0:Y.Array<any>,array1:Y.Array<any>,array2:Y.Array<any>,map0:Y.Map<any>,map1:Y.Map<any>,map2:Y.Map<any>,map3:Y.Map<any>,text0:Y.Text,text1:Y.Text,text2:Y.Text,xml0:Y.XmlElement,xml1:Y.XmlElement,xml2:Y.XmlElement}}
+ * @return {{testObjects:Array<any>,testConnector:TestConnector,users:Array<TestYInstance>,array0:Y.YArray<any>,array1:Y.YArray<any>,array2:Y.YArray<any>,map0:Y.YMap<any>,map1:Y.YMap<any>,map2:Y.YMap<any>,map3:Y.YMap<any>,text0:Y.YText,text1:Y.YText,text2:Y.YText,xml0:Y.YXmlElement,xml1:Y.YXmlElement,xml2:Y.YXmlElement}}
  */
 export const init = (tc, { users = 5 } = {}, initTestObject) => {
   /**
@@ -240,19 +238,27 @@ export const init = (tc, { users = 5 } = {}, initTestObject) => {
     users: []
   }
   const gen = tc.prng
+  // choose an encoding approach at random
+  if (prng.bool(gen)) {
+    Y.useV2Encoding()
+  } else {
+    Y.useV1Encoding()
+  }
+
   const testConnector = new TestConnector(gen)
   result.testConnector = testConnector
   for (let i = 0; i < users; i++) {
     const y = testConnector.createY(i)
     y.clientID = i
     result.users.push(y)
-    result['array' + i] = y.get('array', Y.Array)
-    result['map' + i] = y.get('map', Y.Map)
-    result['xml' + i] = y.get('xml', Y.XmlElement)
-    result['text' + i] = y.get('text', Y.Text)
+    result['array' + i] = y.getArray('array')
+    result['map' + i] = y.getMap('map')
+    result['xml' + i] = y.get('xml', Y.YXmlElement)
+    result['text' + i] = y.getText('text')
   }
   testConnector.syncAll()
   result.testObjects = result.users.map(initTestObject || (() => null))
+  Y.useV1Encoding()
   return /** @type {any} */ (result)
 }
 
@@ -270,7 +276,7 @@ export const compare = users => {
   while (users[0].tc.flushAllMessages()) {}
   const userArrayValues = users.map(u => u.getArray('array').toJSON())
   const userMapValues = users.map(u => u.getMap('map').toJSON())
-  const userXmlValues = users.map(u => u.get('xml', Y.XmlElement).toString())
+  const userXmlValues = users.map(u => u.get('xml', Y.YXmlElement).toString())
   const userTextValues = users.map(u => u.getText('text').toDelta())
   for (const u of users) {
     t.assert(u.store.pendingDeleteReaders.length === 0)
@@ -299,23 +305,23 @@ export const compare = users => {
     t.compare(userXmlValues[i], userXmlValues[i + 1])
     t.compare(userTextValues[i].map(/** @param {any} a */ a => typeof a.insert === 'string' ? a.insert : ' ').join('').length, users[i].getText('text').length)
     t.compare(userTextValues[i], userTextValues[i + 1])
-    t.compare(getStateVector(users[i].store), getStateVector(users[i + 1].store))
-    compareDS(createDeleteSetFromStructStore(users[i].store), createDeleteSetFromStructStore(users[i + 1].store))
+    t.compare(Y.getStateVector(users[i].store), Y.getStateVector(users[i + 1].store))
+    compareDS(Y.createDeleteSetFromStructStore(users[i].store), Y.createDeleteSetFromStructStore(users[i + 1].store))
     compareStructStores(users[i].store, users[i + 1].store)
   }
   users.map(u => u.destroy())
 }
 
 /**
- * @param {Item?} a
- * @param {Item?} b
+ * @param {Y.Item?} a
+ * @param {Y.Item?} b
  * @return {boolean}
  */
 export const compareItemIDs = (a, b) => a === b || (a !== null && b != null && Y.compareIDs(a.id, b.id))
 
 /**
- * @param {StructStore} ss1
- * @param {StructStore} ss2
+ * @param {Y.StructStore} ss1
+ * @param {Y.StructStore} ss2
  */
 export const compareStructStores = (ss1, ss2) => {
   t.assert(ss1.clients.size === ss2.clients.size)
@@ -335,9 +341,9 @@ export const compareStructStores = (ss1, ss2) => {
       ) {
         t.fail('Structs dont match')
       }
-      if (s1 instanceof Item) {
+      if (s1 instanceof Y.Item) {
         if (
-          !(s2 instanceof Item) ||
+          !(s2 instanceof Y.Item) ||
           !((s1.left === null && s2.left === null) || (s1.left !== null && s2.left !== null && Y.compareIDs(s1.left.lastId, s2.left.lastId))) ||
           !compareItemIDs(s1.right, s2.right) ||
           !Y.compareIDs(s1.origin, s2.origin) ||
@@ -357,13 +363,13 @@ export const compareStructStores = (ss1, ss2) => {
 }
 
 /**
- * @param {DeleteSet} ds1
- * @param {DeleteSet} ds2
+ * @param {Y.DeleteSet} ds1
+ * @param {Y.DeleteSet} ds2
  */
 export const compareDS = (ds1, ds2) => {
   t.assert(ds1.clients.size === ds2.clients.size)
-  for (const [client, deleteItems1] of ds1.clients) {
-    const deleteItems2 = /** @type {Array<DeleteItem>} */ (ds2.clients.get(client))
+  ds1.clients.forEach((deleteItems1, client) => {
+    const deleteItems2 = /** @type {Array<Y.DeleteItem>} */ (ds2.clients.get(client))
     t.assert(deleteItems2 !== undefined && deleteItems1.length === deleteItems2.length)
     for (let i = 0; i < deleteItems1.length; i++) {
       const di1 = deleteItems1[i]
@@ -372,7 +378,7 @@ export const compareDS = (ds1, ds2) => {
         t.fail('DeleteSets dont match')
       }
     }
-  }
+  })
 }
 
 /**
@@ -394,21 +400,21 @@ export const applyRandomTests = (tc, mods, iterations, initTestObject) => {
   const result = init(tc, { users: 5 }, initTestObject)
   const { testConnector, users } = result
   for (let i = 0; i < iterations; i++) {
-    if (prng.int31(gen, 0, 100) <= 2) {
+    if (prng.int32(gen, 0, 100) <= 2) {
       // 2% chance to disconnect/reconnect a random user
       if (prng.bool(gen)) {
         testConnector.disconnectRandom()
       } else {
         testConnector.reconnectRandom()
       }
-    } else if (prng.int31(gen, 0, 100) <= 1) {
+    } else if (prng.int32(gen, 0, 100) <= 1) {
       // 1% chance to flush all
       testConnector.flushAllMessages()
-    } else if (prng.int31(gen, 0, 100) <= 50) {
+    } else if (prng.int32(gen, 0, 100) <= 50) {
       // 50% chance to flush a random message
       testConnector.flushRandomMessage()
     }
-    const user = prng.int31(gen, 0, users.length - 1)
+    const user = prng.int32(gen, 0, users.length - 1)
     const test = prng.oneOf(gen, mods)
     test(users[user], gen, result.testObjects[user])
   }

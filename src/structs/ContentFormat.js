@@ -1,10 +1,8 @@
 
 import {
-  Item, StructStore, Transaction // eslint-disable-line
+  AbstractType, AbstractUpdateDecoder, AbstractUpdateEncoder, Item, StructStore, Transaction // eslint-disable-line
 } from '../internals.js'
 
-import * as encoding from 'lib0/encoding.js'
-import * as decoding from 'lib0/decoding.js'
 import * as error from 'lib0/error.js'
 
 /**
@@ -68,7 +66,11 @@ export class ContentFormat {
    * @param {Transaction} transaction
    * @param {Item} item
    */
-  integrate (transaction, item) {}
+  integrate (transaction, item) {
+    // @todo searchmarker are currently unsupported for rich text documents
+    /** @type {AbstractType<any>} */ (item.parent)._searchMarker = null
+  }
+
   /**
    * @param {Transaction} transaction
    */
@@ -78,12 +80,12 @@ export class ContentFormat {
    */
   gc (store) {}
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    * @param {number} offset
    */
   write (encoder, offset) {
-    encoding.writeVarString(encoder, this.key)
-    encoding.writeVarString(encoder, JSON.stringify(this.value))
+    encoder.writeKey(this.key)
+    encoder.writeJSON(this.value)
   }
 
   /**
@@ -95,7 +97,7 @@ export class ContentFormat {
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  * @return {ContentFormat}
  */
-export const readContentFormat = decoder => new ContentFormat(decoding.readVarString(decoder), JSON.parse(decoding.readVarString(decoder)))
+export const readContentFormat = decoder => new ContentFormat(decoder.readString(), decoder.readJSON())

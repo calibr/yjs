@@ -14,11 +14,9 @@ import {
   YMapRefID,
   callTypeObservers,
   transact,
-  Doc, Transaction, Item // eslint-disable-line
+  AbstractUpdateDecoder, AbstractUpdateEncoder, Doc, Transaction, Item // eslint-disable-line
 } from '../internals.js'
 
-import * as encoding from 'lib0/encoding.js'
-import * as decoding from 'lib0/decoding.js' // eslint-disable-line
 import * as iterator from 'lib0/iterator.js'
 
 /**
@@ -76,9 +74,9 @@ export class YMap extends AbstractType {
    */
   _integrate (y, item) {
     super._integrate(y, item)
-    for (const [key, value] of /** @type {Map<string, any>} */ (this._prelimContent)) {
+    ;/** @type {Map<string, any>} */ (this._prelimContent).forEach((value, key) => {
       this.set(key, value)
-    }
+    })
     this._prelimContent = null
   }
 
@@ -106,12 +104,12 @@ export class YMap extends AbstractType {
      * @type {Object<string,T>}
      */
     const map = {}
-    for (const [key, item] of this._map) {
+    this._map.forEach((item, key) => {
       if (!item.deleted) {
         const v = item.content.getContent()[item.length - 1]
         map[key] = v instanceof AbstractType ? v.toJSON() : v
       }
-    }
+    })
     return map
   }
 
@@ -161,11 +159,11 @@ export class YMap extends AbstractType {
      * @type {Object<string,T>}
      */
     const map = {}
-    for (const [key, item] of this._map) {
+    this._map.forEach((item, key) => {
       if (!item.deleted) {
         f(item.content.getContent()[item.length - 1], key, this)
       }
-    }
+    })
     return map
   }
 
@@ -229,15 +227,15 @@ export class YMap extends AbstractType {
   }
 
   /**
-   * @param {encoding.Encoder} encoder
+   * @param {AbstractUpdateEncoder} encoder
    */
   _write (encoder) {
-    encoding.writeVarUint(encoder, YMapRefID)
+    encoder.writeTypeRef(YMapRefID)
   }
 }
 
 /**
- * @param {decoding.Decoder} decoder
+ * @param {AbstractUpdateDecoder} decoder
  *
  * @private
  * @function

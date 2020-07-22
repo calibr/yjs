@@ -24,6 +24,7 @@ export const emptySnapshot: Snapshot;
 export function snapshot(doc: Doc): Snapshot;
 export function isVisible(item: Item, snapshot: Snapshot | undefined): boolean;
 export function splitSnapshotAffectedStructs(transaction: Transaction, snapshot: Snapshot): void;
+export function createDocFromSnapshot(originDoc: Doc, snapshot: Snapshot): Doc;
 import { DeleteSet } from "./DeleteSet.js";
 import { AbstractDSEncoder } from "./UpdateEncoder.js";
 import { AbstractDSDecoder } from "./UpdateDecoder.js";

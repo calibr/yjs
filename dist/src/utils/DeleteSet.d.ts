@@ -37,6 +37,7 @@ export function createDeleteSetFromStructStore(ss: StructStore): DeleteSet;
 export function writeDeleteSet(encoder: AbstractDSEncoder, ds: DeleteSet): void;
 export function readDeleteSet(decoder: AbstractDSDecoder): DeleteSet;
 export function readAndApplyDeleteSet(decoder: AbstractDSDecoder, transaction: Transaction, store: StructStore): void;
+export function applyDeleteItem(transaction: Transaction, structs: Array<GC | Item>, { clock, len }: DeleteItem): void;
 import { Transaction } from "./Transaction.js";
 import { GC } from "../structs/GC.js";
 import { Item } from "../structs/Item.js";

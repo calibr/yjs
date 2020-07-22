@@ -431,7 +431,13 @@ export const readStructs = (decoder, transaction, store) => {
 export const readUpdateV2 = (decoder, ydoc, transactionOrigin, structDecoder = new UpdateDecoderV2(decoder)) =>
   transact(ydoc, transaction => {
     readStructs(structDecoder, transaction, ydoc.store)
-    readAndApplyDeleteSet(structDecoder, transaction, ydoc.store)
+    let allowDeletes = true
+    if (typeof transactionOrigin === 'object' && transactionOrigin && transactionOrigin.disableDeletes === true) {
+      allowDeletes = false
+    }
+    if (allowDeletes) {
+      readAndApplyDeleteSet(structDecoder, transaction, ydoc.store)
+    }
   }, transactionOrigin, false)
 
 /**

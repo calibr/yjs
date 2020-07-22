@@ -9,6 +9,7 @@ import {
   ContentType,
   createID,
   ContentAny,
+  ContentJSON,
   ContentBinary,
   getItemCleanStart,
   AbstractUpdateEncoder, Doc, Snapshot, Transaction, EventHandler, YEvent, Item, // eslint-disable-line
@@ -748,7 +749,7 @@ export const typeMapSet = (transaction, parent, key, value) => {
   const ownClientId = doc.clientID
   let content
   if (value == null) {
-    content = new ContentAny([value])
+    content = new ContentJSON([value])
   } else {
     switch (value.constructor) {
       case Number:
@@ -756,7 +757,7 @@ export const typeMapSet = (transaction, parent, key, value) => {
       case Boolean:
       case Array:
       case String:
-        content = new ContentAny([value])
+        content = new ContentJSON([value])
         break
       case Uint8Array:
         content = new ContentBinary(/** @type {Uint8Array} */ (value))

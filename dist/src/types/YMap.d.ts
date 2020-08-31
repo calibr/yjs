@@ -18,32 +18,12 @@ export class YMapEvent<T> extends YEvent {
  * @extends AbstractType<YMapEvent<T>>
  * @implements {IterableIterator}
  */
-export class YMap<T> extends AbstractType<YMapEvent<T>> {
+export class YMap<T> extends AbstractType<YMapEvent<T>> implements IterableIterator<any> {
     /**
      * @type {Map<string,any>?}
      * @private
      */
-    _prelimContent: Map<string, any> | null;
-    /**
-     * Integrate this type into the Yjs instance.
-     *
-     * * Save this struct in the os
-     * * This type is sent to other client
-     * * Observer functions are fired
-     *
-     * @param {Doc} y The Yjs instance
-     * @param {Item} item
-     */
-    _integrate(y: Doc, item: Item): void;
-    _copy(): YMap<any>;
-    /**
-     * Transforms this Shared Type to a JSON object.
-     *
-     * @return {Object<string,T>}
-     */
-    toJSON(): {
-        [x: string]: T;
-    };
+    private _prelimContent;
     /**
      * Returns the keys for each element in the YMap Type.
      *
@@ -73,7 +53,7 @@ export class YMap<T> extends AbstractType<YMapEvent<T>> {
     /**
      * @return {IterableIterator<T>}
      */
-    "__@iterator"(): IterableIterator<T>;
+    [Symbol.iterator](): IterableIterator<T>;
     /**
      * Remove a specified element from this YMap.
      *
@@ -106,6 +86,4 @@ export function readYMap(decoder: decoding.Decoder): YMap<any>;
 import { YEvent } from "../utils/YEvent.js";
 import { Transaction } from "../utils/Transaction.js";
 import { AbstractType } from "./AbstractType.js";
-import { Doc } from "../utils/Doc.js";
-import { Item } from "../structs/Item.js";
 import * as decoding from "lib0/decoding";

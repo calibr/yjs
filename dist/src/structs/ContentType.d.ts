@@ -29,7 +29,7 @@ export class ContentType {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */

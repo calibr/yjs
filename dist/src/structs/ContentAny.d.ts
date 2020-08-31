@@ -2,7 +2,7 @@ export class ContentAny {
     /**
      * @param {Array<any>} arr
      */
-    constructor(arr: any[]);
+    constructor(arr: Array<any>);
     /**
      * @type {Array<any>}
      */
@@ -14,7 +14,7 @@ export class ContentAny {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */

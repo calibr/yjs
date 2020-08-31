@@ -62,13 +62,13 @@ export class YEvent {
     get changes(): {
         added: Set<Item>;
         deleted: Set<Item>;
-        delta: ({
-            insert: any[];
+        delta: Array<{
+            insert: Array<any>;
         } | {
             delete: number;
         } | {
             retain: number;
-        })[];
+        }>;
     };
 }
 import { AbstractType } from "../types/AbstractType.js";

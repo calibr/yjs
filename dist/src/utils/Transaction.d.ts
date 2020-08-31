@@ -43,19 +43,19 @@ export class Transaction {
      * Holds the state before the transaction started.
      * @type {Map<Number,Number>}
      */
-    beforeState: Map<Number, Number>;
+    beforeState: Map<number, number>;
     /**
      * Holds the state after the transaction.
      * @type {Map<Number,Number>}
      */
-    afterState: Map<Number, Number>;
+    afterState: Map<number, number>;
     /**
      * All types that were directly modified (property added or child
      * inserted/deleted). New types are not included in this Set.
      * Maps from type to parentSubs (`item.parentSub = null` for YArray)
      * @type {Map<AbstractType<YEvent>,Set<String|null>>}
      */
-    changed: Map<AbstractType<YEvent>, Set<String | null>>;
+    changed: Map<AbstractType<YEvent>, Set<string | null>>;
     /**
      * Stores the events for the types that observe also child elements.
      * It is mainly used by `observeDeep`.

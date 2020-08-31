@@ -11,7 +11,7 @@ export class ContentDeleted {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */

@@ -4,7 +4,6 @@
  */
 export class YXmlText extends YText {
     constructor(string?: string | undefined);
-    _copy(): YXmlText;
     /**
      * Creates a Dom Element that mirrors this YXmlText.
      *
@@ -20,10 +19,9 @@ export class YXmlText extends YText {
      *
      * @public
      */
-    toDOM(_document?: Document | undefined, hooks?: {
+    public toDOM(_document?: Document | undefined, hooks?: {
         [x: string]: any;
     } | undefined, binding?: any): Text;
-    toString(): any;
 }
 export function readYXmlText(decoder: decoding.Decoder): YXmlText;
 import { YText } from "./YText.js";

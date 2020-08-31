@@ -82,6 +82,12 @@
   const exp10 = exp => Math.pow(10, exp);
 
   /**
+   * @param {number} n
+   * @return {boolean} Wether n is negative. This function also differentiates between -0 and +0
+   */
+  const isNegativeZero = n => n !== 0 ? n < 0 : 1 / n < 0;
+
+  /**
    * Utility module to work with key-value stores.
    *
    * @module map
@@ -190,71 +196,22 @@
    */
   const fromCamelCase = (s, separator) => trimLeft(s.replace(fromCamelCaseRegex, match => `${separator}${toLowerCase(match)}`));
 
-  /**
-   * @param {string} str
-   * @return {Uint8Array}
-   */
-  const _encodeUtf8Polyfill = str => {
-    const encodedString = unescape(encodeURIComponent(str));
-    const len = encodedString.length;
-    const buf = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      buf[i] = /** @type {number} */ (encodedString.codePointAt(i));
-    }
-    return buf
-  };
-
   /* istanbul ignore next */
   const utf8TextEncoder = /** @type {TextEncoder} */ (typeof TextEncoder !== 'undefined' ? new TextEncoder() : null);
 
-  /**
-   * @param {string} str
-   * @return {Uint8Array}
-   */
-  const _encodeUtf8Native = str => utf8TextEncoder.encode(str);
-
-  /**
-   * @param {string} str
-   * @return {Uint8Array}
-   */
   /* istanbul ignore next */
-  const encodeUtf8 = utf8TextEncoder ? _encodeUtf8Native : _encodeUtf8Polyfill;
-
-  /**
-   * @param {Uint8Array} buf
-   * @return {string}
-   */
-  const _decodeUtf8Polyfill = buf => {
-    let remainingLen = buf.length;
-    let encodedString = '';
-    let bufPos = 0;
-    while (remainingLen > 0) {
-      const nextLen = remainingLen < 10000 ? remainingLen : 10000;
-      const bytes = new Array(nextLen);
-      for (let i = 0; i < nextLen; i++) {
-        bytes[i] = buf[bufPos++];
-      }
-      encodedString += String.fromCodePoint.apply(null, bytes);
-      remainingLen -= nextLen;
-    }
-    return decodeURIComponent(escape(encodedString))
-  };
+  let utf8TextDecoder = typeof TextDecoder === 'undefined' ? null : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
   /* istanbul ignore next */
-  const utf8TextDecoder = typeof TextDecoder === 'undefined' ? null : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-
-  /**
-   * @param {Uint8Array} buf
-   * @return {string}
-   */
-  const _decodeUtf8Native = buf => /** @type {TextDecoder} */ (utf8TextDecoder).decode(buf);
-
-  /**
-   * @param {Uint8Array} buf
-   * @return {string}
-   */
-  /* istanbul ignore next */
-  const decodeUtf8 = utf8TextDecoder ? _decodeUtf8Native : _decodeUtf8Polyfill;
+  if (utf8TextDecoder && utf8TextDecoder.decode(new Uint8Array()).length === 1) {
+    // Safari doesn't handle BOM correctly.
+    // This fixes a bug in Safari 13.0.5 where it produces a BOM the first time it is called.
+    // utf8TextDecoder.decode(new Uint8Array()).length === 1 on the first call and
+    // utf8TextDecoder.decode(new Uint8Array()).length === 1 on the second call
+    // Another issue is that from then on no BOM chars are recognized anymore
+    /* istanbul ignore next */
+    utf8TextDecoder = null;
+  }
 
   /**
    * Often used conditions.
@@ -414,6 +371,277 @@
   /* istanbul ignore next */
   const production = hasConf('production');
 
+  /* eslint-env browser */
+  const BIT6 = 32;
+  const BIT7 = 64;
+  const BIT8 = 128;
+  const BITS5 = 31;
+  const BITS6 = 63;
+  const BITS7 = 127;
+  const BITS31 = 0x7FFFFFFF;
+  const BITS32 = 0xFFFFFFFF;
+
+  /**
+   * Efficient schema-less binary decoding with support for variable length encoding.
+   *
+   * Use [lib0/decoding] with [lib0/encoding]. Every encoding function has a corresponding decoding function.
+   *
+   * Encodes numbers in little-endian order (least to most significant byte order)
+   * and is compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
+   * which is also used in Protocol Buffers.
+   *
+   * ```js
+   * // encoding step
+   * const encoder = new encoding.createEncoder()
+   * encoding.writeVarUint(encoder, 256)
+   * encoding.writeVarString(encoder, 'Hello world!')
+   * const buf = encoding.toUint8Array(encoder)
+   * ```
+   *
+   * ```js
+   * // decoding step
+   * const decoder = new decoding.createDecoder(buf)
+   * decoding.readVarUint(decoder) // => 256
+   * decoding.readVarString(decoder) // => 'Hello world!'
+   * decoding.hasContent(decoder) // => false - all data is read
+   * ```
+   *
+   * @module decoding
+   */
+
+  /**
+   * A Decoder handles the decoding of an Uint8Array.
+   */
+  class Decoder {
+    /**
+     * @param {Uint8Array} uint8Array Binary data to decode
+     */
+    constructor (uint8Array) {
+      /**
+       * Decoding target.
+       *
+       * @type {Uint8Array}
+       */
+      this.arr = uint8Array;
+      /**
+       * Current decoding position.
+       *
+       * @type {number}
+       */
+      this.pos = 0;
+    }
+  }
+
+  /**
+   * @function
+   * @param {Uint8Array} uint8Array
+   * @return {Decoder}
+   */
+  const createDecoder = uint8Array => new Decoder(uint8Array);
+
+  /**
+   * Create an Uint8Array view of the next `len` bytes and advance the position by `len`.
+   *
+   * Important: The Uint8Array still points to the underlying ArrayBuffer. Make sure to discard the result as soon as possible to prevent any memory leaks.
+   *            Use `buffer.copyUint8Array` to copy the result into a new Uint8Array.
+   *
+   * @function
+   * @param {Decoder} decoder The decoder instance
+   * @param {number} len The length of bytes to read
+   * @return {Uint8Array}
+   */
+  const readUint8Array = (decoder, len) => {
+    const view = createUint8ArrayViewFromArrayBuffer(decoder.arr.buffer, decoder.pos + decoder.arr.byteOffset, len);
+    decoder.pos += len;
+    return view
+  };
+
+  /**
+   * Read variable length Uint8Array.
+   *
+   * Important: The Uint8Array still points to the underlying ArrayBuffer. Make sure to discard the result as soon as possible to prevent any memory leaks.
+   *            Use `buffer.copyUint8Array` to copy the result into a new Uint8Array.
+   *
+   * @function
+   * @param {Decoder} decoder
+   * @return {Uint8Array}
+   */
+  const readVarUint8Array = decoder => readUint8Array(decoder, readVarUint(decoder));
+
+  /**
+   * Read one byte as unsigned integer.
+   * @function
+   * @param {Decoder} decoder The decoder instance
+   * @return {number} Unsigned 8-bit integer
+   */
+  const readUint8 = decoder => decoder.arr[decoder.pos++];
+
+  /**
+   * Read unsigned integer (32bit) with variable length.
+   * 1/8th of the storage is used as encoding overhead.
+   *  * numbers < 2^7 is stored in one bytlength
+   *  * numbers < 2^14 is stored in two bylength
+   *
+   * @function
+   * @param {Decoder} decoder
+   * @return {number} An unsigned integer.length
+   */
+  const readVarUint = decoder => {
+    let num = 0;
+    let len = 0;
+    while (true) {
+      const r = decoder.arr[decoder.pos++];
+      num = num | ((r & BITS7) << len);
+      len += 7;
+      if (r < BIT8) {
+        return num >>> 0 // return unsigned number!
+      }
+      /* istanbul ignore if */
+      if (len > 35) {
+        throw new Error('Integer out of range!')
+      }
+    }
+  };
+
+  /**
+   * Read signed integer (32bit) with variable length.
+   * 1/8th of the storage is used as encoding overhead.
+   *  * numbers < 2^7 is stored in one bytlength
+   *  * numbers < 2^14 is stored in two bylength
+   * @todo This should probably create the inverse ~num if unmber is negative - but this would be a breaking change.
+   *
+   * @function
+   * @param {Decoder} decoder
+   * @return {number} An unsigned integer.length
+   */
+  const readVarInt = decoder => {
+    let r = decoder.arr[decoder.pos++];
+    let num = r & BITS6;
+    let len = 6;
+    const sign = (r & BIT7) > 0 ? -1 : 1;
+    if ((r & BIT8) === 0) {
+      // don't continue reading
+      return sign * num
+    }
+    while (true) {
+      r = decoder.arr[decoder.pos++];
+      num = num | ((r & BITS7) << len);
+      len += 7;
+      if (r < BIT8) {
+        return sign * (num >>> 0)
+      }
+      /* istanbul ignore if */
+      if (len > 41) {
+        throw new Error('Integer out of range!')
+      }
+    }
+  };
+
+  /**
+   * Read string of variable length
+   * * varUint is used to store the length of the string
+   *
+   * Transforming utf8 to a string is pretty expensive. The code performs 10x better
+   * when String.fromCodePoint is fed with all characters as arguments.
+   * But most environments have a maximum number of arguments per functions.
+   * For effiency reasons we apply a maximum of 10000 characters at once.
+   *
+   * @function
+   * @param {Decoder} decoder
+   * @return {String} The read String.
+   */
+  const readVarString = decoder => {
+    let remainingLen = readVarUint(decoder);
+    if (remainingLen === 0) {
+      return ''
+    } else {
+      let encodedString = String.fromCodePoint(readUint8(decoder)); // remember to decrease remainingLen
+      if (--remainingLen < 100) { // do not create a Uint8Array for small strings
+        while (remainingLen--) {
+          encodedString += String.fromCodePoint(readUint8(decoder));
+        }
+      } else {
+        while (remainingLen > 0) {
+          const nextLen = remainingLen < 10000 ? remainingLen : 10000;
+          // this is dangerous, we create a fresh array view from the existing buffer
+          const bytes = decoder.arr.subarray(decoder.pos, decoder.pos + nextLen);
+          decoder.pos += nextLen;
+          // Starting with ES5.1 we can supply a generic array-like object as arguments
+          encodedString += String.fromCodePoint.apply(null, /** @type {any} */ (bytes));
+          remainingLen -= nextLen;
+        }
+      }
+      return decodeURIComponent(escape(encodedString))
+    }
+  };
+
+  /**
+   * @param {Decoder} decoder
+   * @param {number} len
+   * @return {DataView}
+   */
+  const readFromDataView = (decoder, len) => {
+    const dv = new DataView(decoder.arr.buffer, decoder.arr.byteOffset + decoder.pos, len);
+    decoder.pos += len;
+    return dv
+  };
+
+  /**
+   * @param {Decoder} decoder
+   */
+  const readFloat32 = decoder => readFromDataView(decoder, 4).getFloat32(0);
+
+  /**
+   * @param {Decoder} decoder
+   */
+  const readFloat64 = decoder => readFromDataView(decoder, 8).getFloat64(0);
+
+  /**
+   * @param {Decoder} decoder
+   */
+  const readBigInt64 = decoder => /** @type {any} */ (readFromDataView(decoder, 8)).getBigInt64(0);
+
+  /**
+   * @type {Array<function(Decoder):any>}
+   */
+  const readAnyLookupTable = [
+    decoder => undefined, // CASE 127: undefined
+    decoder => null, // CASE 126: null
+    readVarInt, // CASE 125: integer
+    readFloat32, // CASE 124: float32
+    readFloat64, // CASE 123: float64
+    readBigInt64, // CASE 122: bigint
+    decoder => false, // CASE 121: boolean (false)
+    decoder => true, // CASE 120: boolean (true)
+    readVarString, // CASE 119: string
+    decoder => { // CASE 118: object<string,any>
+      const len = readVarUint(decoder);
+      /**
+       * @type {Object<string,any>}
+       */
+      const obj = {};
+      for (let i = 0; i < len; i++) {
+        const key = readVarString(decoder);
+        obj[key] = readAny(decoder);
+      }
+      return obj
+    },
+    decoder => { // CASE 117: array<any>
+      const len = readVarUint(decoder);
+      const arr = [];
+      for (let i = 0; i < len; i++) {
+        arr.push(readAny(decoder));
+      }
+      return arr
+    },
+    readVarUint8Array // CASE 116: Uint8Array
+  ];
+
+  /**
+   * @param {Decoder} decoder
+   */
+  const readAny = decoder => readAnyLookupTable[127 - readUint8(decoder)](decoder);
+
   /**
    * Utility functions to work with buffers (Uint8Array).
    *
@@ -445,16 +673,6 @@
     newBuf.set(uint8Array);
     return newBuf
   };
-
-  /* eslint-env browser */
-  const BIT6 = 32;
-  const BIT7 = 64;
-  const BIT8 = 128;
-  const BITS5 = 31;
-  const BITS6 = 63;
-  const BITS7 = 127;
-  const BITS31 = 0x7FFFFFFF;
-  const BITS32 = 0xFFFFFFFF;
 
   /**
    * Utility helpers for working with numbers.
@@ -615,15 +833,19 @@
    *
    * Encodes integers in the range from [-2147483648, -2147483647].
    *
+   * We don't use zig-zag encoding because we want to keep the option open
+   * to use the same function for BigInt and 53bit integers (doubles).
+   *
+   * We use the 7th bit instead for signaling that this is a negative number.
+   *
    * @function
    * @param {Encoder} encoder
    * @param {number} num The number that is to be encoded.
    */
   const writeVarInt = (encoder, num) => {
-    let isNegative = false;
-    if (num < 0) {
+    const isNegative = isNegativeZero(num);
+    if (isNegative) {
       num = -num;
-      isNegative = true;
     }
     //             |- whether to continue reading         |- whether is negative     |- number
     write(encoder, (num > BITS6 ? BIT8 : 0) | (isNegative ? BIT7 : 0) | (BITS6 & num));
@@ -643,8 +865,14 @@
    * @param {Encoder} encoder
    * @param {String} str The string that is to be encoded.
    */
-  const writeVarString = (encoder, str) =>
-    writeVarUint8Array(encoder, encodeUtf8(str));
+  const writeVarString = (encoder, str) => {
+    const encodedString = unescape(encodeURIComponent(str));
+    const len = encodedString.length;
+    writeVarUint(encoder, len);
+    for (let i = 0; i < len; i++) {
+      write(encoder, /** @type {number} */ (encodedString.codePointAt(i)));
+    }
+  };
 
   /**
    * Append fixed-length Uint8Array to the encoder.
@@ -838,244 +1066,6 @@
         write(encoder, 127);
     }
   };
-
-  /**
-   * Efficient schema-less binary decoding with support for variable length encoding.
-   *
-   * Use [lib0/decoding] with [lib0/encoding]. Every encoding function has a corresponding decoding function.
-   *
-   * Encodes numbers in little-endian order (least to most significant byte order)
-   * and is compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
-   * which is also used in Protocol Buffers.
-   *
-   * ```js
-   * // encoding step
-   * const encoder = new encoding.createEncoder()
-   * encoding.writeVarUint(encoder, 256)
-   * encoding.writeVarString(encoder, 'Hello world!')
-   * const buf = encoding.toUint8Array(encoder)
-   * ```
-   *
-   * ```js
-   * // decoding step
-   * const decoder = new decoding.createDecoder(buf)
-   * decoding.readVarUint(decoder) // => 256
-   * decoding.readVarString(decoder) // => 'Hello world!'
-   * decoding.hasContent(decoder) // => false - all data is read
-   * ```
-   *
-   * @module decoding
-   */
-
-  /**
-   * A Decoder handles the decoding of an Uint8Array.
-   */
-  class Decoder {
-    /**
-     * @param {Uint8Array} uint8Array Binary data to decode
-     */
-    constructor (uint8Array) {
-      /**
-       * Decoding target.
-       *
-       * @type {Uint8Array}
-       */
-      this.arr = uint8Array;
-      /**
-       * Current decoding position.
-       *
-       * @type {number}
-       */
-      this.pos = 0;
-    }
-  }
-
-  /**
-   * @function
-   * @param {Uint8Array} uint8Array
-   * @return {Decoder}
-   */
-  const createDecoder = uint8Array => new Decoder(uint8Array);
-
-  /**
-   * Create an Uint8Array view of the next `len` bytes and advance the position by `len`.
-   *
-   * Important: The Uint8Array still points to the underlying ArrayBuffer. Make sure to discard the result as soon as possible to prevent any memory leaks.
-   *            Use `buffer.copyUint8Array` to copy the result into a new Uint8Array.
-   *
-   * @function
-   * @param {Decoder} decoder The decoder instance
-   * @param {number} len The length of bytes to read
-   * @return {Uint8Array}
-   */
-  const readUint8Array = (decoder, len) => {
-    const view = createUint8ArrayViewFromArrayBuffer(decoder.arr.buffer, decoder.pos + decoder.arr.byteOffset, len);
-    decoder.pos += len;
-    return view
-  };
-
-  /**
-   * Read variable length Uint8Array.
-   *
-   * Important: The Uint8Array still points to the underlying ArrayBuffer. Make sure to discard the result as soon as possible to prevent any memory leaks.
-   *            Use `buffer.copyUint8Array` to copy the result into a new Uint8Array.
-   *
-   * @function
-   * @param {Decoder} decoder
-   * @return {Uint8Array}
-   */
-  const readVarUint8Array = decoder => readUint8Array(decoder, readVarUint(decoder));
-
-  /**
-   * Read one byte as unsigned integer.
-   * @function
-   * @param {Decoder} decoder The decoder instance
-   * @return {number} Unsigned 8-bit integer
-   */
-  const readUint8 = decoder => decoder.arr[decoder.pos++];
-
-  /**
-   * Read unsigned integer (32bit) with variable length.
-   * 1/8th of the storage is used as encoding overhead.
-   *  * numbers < 2^7 is stored in one bytlength
-   *  * numbers < 2^14 is stored in two bylength
-   *
-   * @function
-   * @param {Decoder} decoder
-   * @return {number} An unsigned integer.length
-   */
-  const readVarUint = decoder => {
-    let num = 0;
-    let len = 0;
-    while (true) {
-      const r = decoder.arr[decoder.pos++];
-      num = num | ((r & BITS7) << len);
-      len += 7;
-      if (r < BIT8) {
-        return num >>> 0 // return unsigned number!
-      }
-      /* istanbul ignore if */
-      if (len > 35) {
-        throw new Error('Integer out of range!')
-      }
-    }
-  };
-
-  /**
-   * Read signed integer (32bit) with variable length.
-   * 1/8th of the storage is used as encoding overhead.
-   *  * numbers < 2^7 is stored in one bytlength
-   *  * numbers < 2^14 is stored in two bylength
-   *
-   * @function
-   * @param {Decoder} decoder
-   * @return {number} An unsigned integer.length
-   */
-  const readVarInt = decoder => {
-    let r = decoder.arr[decoder.pos++];
-    let num = r & BITS6;
-    let len = 6;
-    const sign = (r & BIT7) > 0 ? -1 : 1;
-    if ((r & BIT8) === 0) {
-      // don't continue reading
-      return sign * num
-    }
-    while (true) {
-      r = decoder.arr[decoder.pos++];
-      num = num | ((r & BITS7) << len);
-      len += 7;
-      if (r < BIT8) {
-        return sign * num
-      }
-      /* istanbul ignore if */
-      if (len > 41) {
-        throw new Error('Integer out of range!')
-      }
-    }
-  };
-
-  /**
-   * Read string of variable length
-   * * varUint is used to store the length of the string
-   *
-   * Transforming utf8 to a string is pretty expensive. The code performs 10x better
-   * when String.fromCodePoint is fed with all characters as arguments.
-   * But most environments have a maximum number of arguments per functions.
-   * For effiency reasons we apply a maximum of 10000 characters at once.
-   *
-   * @function
-   * @param {Decoder} decoder
-   * @return {String} The read String.
-   */
-  const readVarString = decoder =>
-    decodeUtf8(readVarUint8Array(decoder));
-
-  /**
-   * @param {Decoder} decoder
-   * @param {number} len
-   * @return {DataView}
-   */
-  const readFromDataView = (decoder, len) => {
-    const dv = new DataView(decoder.arr.buffer, decoder.arr.byteOffset + decoder.pos, len);
-    decoder.pos += len;
-    return dv
-  };
-
-  /**
-   * @param {Decoder} decoder
-   */
-  const readFloat32 = decoder => readFromDataView(decoder, 4).getFloat32(0);
-
-  /**
-   * @param {Decoder} decoder
-   */
-  const readFloat64 = decoder => readFromDataView(decoder, 8).getFloat64(0);
-
-  /**
-   * @param {Decoder} decoder
-   */
-  const readBigInt64 = decoder => /** @type {any} */ (readFromDataView(decoder, 8)).getBigInt64(0);
-
-  /**
-   * @type {Array<function(Decoder):any>}
-   */
-  const readAnyLookupTable = [
-    decoder => undefined, // CASE 127: undefined
-    decoder => null, // CASE 126: null
-    readVarInt, // CASE 125: integer
-    readFloat32, // CASE 124: float32
-    readFloat64, // CASE 123: float64
-    readBigInt64, // CASE 122: bigint
-    decoder => false, // CASE 121: boolean (false)
-    decoder => true, // CASE 120: boolean (true)
-    readVarString, // CASE 119: string
-    decoder => { // CASE 118: object<string,any>
-      const len = readVarUint(decoder);
-      /**
-       * @type {Object<string,any>}
-       */
-      const obj = {};
-      for (let i = 0; i < len; i++) {
-        const key = readVarString(decoder);
-        obj[key] = readAny(decoder);
-      }
-      return obj
-    },
-    decoder => { // CASE 117: array<any>
-      const len = readVarUint(decoder);
-      const arr = [];
-      for (let i = 0; i < len; i++) {
-        arr.push(readAny(decoder));
-      }
-      return arr
-    },
-    readVarUint8Array // CASE 116: Uint8Array
-  ];
-
-  /**
-   * @param {Decoder} decoder
-   */
-  const readAny = decoder => readAnyLookupTable[127 - readUint8(decoder)](decoder);
 
   class DeleteItem {
     /**
@@ -1470,17 +1460,19 @@
   const cryptoRandomBuffer = isoCrypto !== null
     ? len => {
       // browser
-      const arr = new Uint8Array(len);
+      const buf = new ArrayBuffer(len);
+      const arr = new Uint8Array(buf);
       isoCrypto.getRandomValues(arr);
-      return arr.buffer
+      return buf
     }
     : len => {
       // polyfill
-      const arr = new Uint8Array(len);
+      const buf = new ArrayBuffer(len);
+      const arr = new Uint8Array(buf);
       for (let i = 0; i < len; i++) {
         arr[i] = Math.ceil((Math.random() * 0xFFFFFFFF) >>> 0);
       }
-      return arr.buffer
+      return buf
     };
 
   var performance_1 = perf;
@@ -1951,7 +1943,7 @@
     transact(ydoc, transaction => {
       readStructs(decoder, transaction, ydoc.store);
       let allowDeletes = true;
-      if (typeof transactionOrigin === 'object' && transactionOrigin.disableDeletes === true) {
+      if (transactionOrigin && typeof transactionOrigin === 'object' && transactionOrigin.disableDeletes === true) {
         allowDeletes = false;
       }
       if (allowDeletes) {
@@ -8551,7 +8543,7 @@
   const fragment = children => {
     const fragment = createDocumentFragment();
     for (let i = 0; i < children.length; i++) {
-      fragment.appendChild(children[i]);
+      appendChild(fragment, children[i]);
     }
     return fragment
   };
@@ -8563,7 +8555,7 @@
    */
   /* istanbul ignore next */
   const append = (parent, nodes) => {
-    parent.appendChild(fragment(nodes));
+    appendChild(parent, fragment(nodes));
     return parent
   };
 
@@ -8598,6 +8590,14 @@
    */
   /* istanbul ignore next */
   const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
+
+  /**
+   * @param {Node} parent
+   * @param {Node} child
+   * @return {Node}
+   */
+  /* istanbul ignore next */
+  const appendChild = (parent, child) => parent.appendChild(child);
 
   /**
    * JSON utility functions.
@@ -9179,6 +9179,17 @@
   const bool = gen => (gen.next() >= 0.5);
 
   /**
+   * Generates a random integer with 32 bit resolution.
+   *
+   * @param {PRNG} gen A random number generator.
+   * @param {Number} min The lower bound of the allowed return values (inclusive).
+   * @param {Number} max The upper bound of the allowed return values (inclusive).
+   * @return {Number} A random integer on [min, max]
+   */
+  const int32 = (gen, min, max) => floor(gen.next() * (max + 1 - min) + min);
+
+  /**
+   * @deprecated
    * Optimized version of prng.int32. It has the same precision as prng.int32, but should be preferred when
    * openaring on smaller ranges.
    *
@@ -9187,11 +9198,7 @@
    * @param {Number} max The upper bound of the allowed return values (inclusive). The max inclusive number is `binary.BITS31-1`
    * @return {Number} A random integer on [min, max]
    */
-  const int31 = (gen, min$1, max) => {
-    const _min = min$1 & BITS31;
-    const _max = max & BITS31;
-    return floor(gen.next() * (min(_max - _min + 1, BITS31) & BITS31) + _min)
-  };
+  const int31 = (gen, min, max) => int32(gen, min, max);
 
   /**
    * TODO: this function produces invalid runes. Does not cover all of utf16!!
@@ -9244,6 +9251,23 @@
    * @return {number}
    */
   const average = arr => arr.reduce(add, 0) / arr.length;
+
+  /**
+   * Utility helpers to work with promises.
+   *
+   * @module promise
+   */
+
+  /**
+   * Checks if an object is a promise using ducktyping.
+   *
+   * Promises are often polyfilled, so it makes sense to add some additional guarantees if the user of this
+   * library has some insane environment where global Promise objects are overwritten.
+   *
+   * @param {any} p
+   * @return {boolean}
+   */
+  const isPromise = p => p instanceof Promise || (p && p.then && p.catch && p.finally);
 
   /**
    * Testing framework with support for generating tests.
@@ -9385,7 +9409,7 @@
     do {
       try {
         const p = f(tc);
-        if (p != null && p.constructor === Promise) {
+        if (isPromise(p)) {
           await p;
         }
       } catch (_err) {

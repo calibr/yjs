@@ -11,7 +11,7 @@ export class ContentBinary {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */

@@ -16,7 +16,7 @@ export class ContentFormat {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */

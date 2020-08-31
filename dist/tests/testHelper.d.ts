@@ -84,11 +84,11 @@ export class TestConnector {
     reconnectRandom(): boolean;
 }
 export function init<T>(tc: t.TestCase, { users }?: {
-    users?: number | undefined;
+    users?: number;
 }, initTestObject?: InitTestObjectCallback<T> | undefined): {
-    testObjects: any[];
+    testObjects: Array<any>;
     testConnector: TestConnector;
-    users: TestYInstance[];
+    users: Array<TestYInstance>;
     array0: Y.Array<any>;
     array1: Y.Array<any>;
     array2: Y.Array<any>;
@@ -103,14 +103,14 @@ export function init<T>(tc: t.TestCase, { users }?: {
     xml1: Y.XmlElement;
     xml2: Y.XmlElement;
 };
-export function compare(users: TestYInstance[]): void;
-export function compareItemIDs(a: Y.Item | null, b: Y.Item | null): boolean;
+export function compare(users: Array<TestYInstance>): void;
+export function compareItemIDs(a: Item | null, b: Item | null): boolean;
 export function compareStructStores(ss1: StructStore, ss2: StructStore): undefined;
 export function compareDS(ds1: DeleteSet, ds2: DeleteSet): void;
 export function applyRandomTests<T>(tc: t.TestCase, mods: ((arg0: Y.Doc, arg1: prng.PRNG, arg2: T) => void)[], iterations: number, initTestObject?: InitTestObjectCallback<T> | undefined): {
-    testObjects: any[];
+    testObjects: Array<any>;
     testConnector: TestConnector;
-    users: TestYInstance[];
+    users: Array<TestYInstance>;
     array0: Y.Array<any>;
     array1: Y.Array<any>;
     array2: Y.Array<any>;
@@ -129,5 +129,7 @@ export type InitTestObjectCallback<T> = (y: TestYInstance) => T;
 import * as Y from "../src/index.js";
 import * as prng from "lib0/prng";
 import * as t from "lib0/testing";
+import { Item } from "../src/structs/Item.js";
 import { StructStore } from "../src/utils/StructStore.js";
 import { DeleteSet } from "../src/utils/DeleteSet.js";
+import { Doc } from "../src/utils/Doc.js";

@@ -9,13 +9,13 @@ export class YXmlEvent extends YEvent {
      * @param {Transaction} transaction The transaction instance with wich the
      *                                  change was created.
      */
-    constructor(target: YXmlFragment | YXmlElement, subs: Set<string | null>, transaction: Transaction);
+    constructor(target: YXmlElement | YXmlFragment, subs: Set<string | null>, transaction: Transaction);
     /**
      * Whether the children changed.
      * @type {Boolean}
      * @private
      */
-    childListChanged: Boolean;
+    private childListChanged;
     /**
      * Set of all changed attributes.
      * @type {Set<string|null>}
@@ -23,6 +23,6 @@ export class YXmlEvent extends YEvent {
     attributesChanged: Set<string | null>;
 }
 import { YEvent } from "../utils/YEvent.js";
-import { YXmlFragment } from "./YXmlFragment.js";
 import { YXmlElement } from "./YXmlElement.js";
+import { YXmlFragment } from "./YXmlFragment.js";
 import { Transaction } from "../utils/Transaction.js";

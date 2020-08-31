@@ -5,7 +5,7 @@ export class ContentJSON {
     /**
      * @param {Array<any>} arr
      */
-    constructor(arr: any[]);
+    constructor(arr: Array<any>);
     /**
      * @type {Array<any>}
      */
@@ -17,7 +17,7 @@ export class ContentJSON {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * @return {boolean}
      */

@@ -25,7 +25,7 @@ export class Item extends AbstractStruct {
      * @type {ID | null}
      * @readonly
      */
-    origin: ID | null;
+    readonly origin: ID | null;
     /**
      * The item that is currently to the left of this item.
      * @type {Item | null}
@@ -41,13 +41,13 @@ export class Item extends AbstractStruct {
      * @readonly
      * @type {ID | null}
      */
-    rightOrigin: ID | null;
+    readonly rightOrigin: ID | null;
     /**
      * The parent type.
      * @type {AbstractType<any>}
      * @readonly
      */
-    parent: AbstractType<any>;
+    readonly parent: AbstractType<any>;
     /**
      * If the parent refers to this item with some kind of key (e.g. YMap, the
      * key is specified here. The key is then used to refer to the list in which
@@ -56,7 +56,7 @@ export class Item extends AbstractStruct {
      * @type {String | null}
      * @readonly
      */
-    parentSub: String | null;
+    readonly parentSub: string | null;
     /**
      * If this type's effect is reundone this type refers to the type that undid
      * this operation.
@@ -85,13 +85,6 @@ export class Item extends AbstractStruct {
      */
     get lastId(): ID;
     /**
-     * Try to merge two items
-     *
-     * @param {Item} right
-     * @return {boolean}
-     */
-    mergeWith(right: Item): boolean;
-    /**
      * Mark this Item as deleted.
      *
      * @param {Transaction} transaction
@@ -102,16 +95,6 @@ export class Item extends AbstractStruct {
      * @param {boolean} parentGCd
      */
     gc(store: StructStore, parentGCd: boolean): void;
-    /**
-     * Transform the properties of this type to binary and write it to an
-     * BinaryEncoder.
-     *
-     * This is called when this Item is sent to a remote peer.
-     *
-     * @param {encoding.Encoder} encoder The encoder to write data to.
-     * @param {number} offset
-     */
-    write(encoder: encoding.Encoder, offset: number): void;
 }
 /**
  * A lookup map for reading Item content.
@@ -130,7 +113,7 @@ export class AbstractContent {
     /**
      * @return {Array<any>}
      */
-    getContent(): any[];
+    getContent(): Array<any>;
     /**
      * Should return false if this Item is some kind of meta information
      * (e.g. format information).
@@ -217,26 +200,18 @@ export class ItemRef extends AbstractStructRef {
      * which to insert to. Otherwise it is `parent._map`.
      * @type {String | null}
      */
-    parentSub: String | null;
+    parentSub: string | null;
     /**
      * @type {AbstractContent}
      */
     content: AbstractContent;
     length: number;
-    /**
-     * @param {Transaction} transaction
-     * @param {StructStore} store
-     * @param {number} offset
-     * @return {Item|GC}
-     */
-    toStruct(transaction: Transaction, store: StructStore, offset: number): GC | Item;
 }
 import { StructStore } from "../utils/StructStore.js";
 import { ID } from "../utils/ID.js";
 import { Transaction } from "../utils/Transaction.js";
 import { AbstractStruct } from "./AbstractStruct.js";
 import { AbstractType } from "../types/AbstractType.js";
-import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
+import * as encoding from "lib0/encoding";
 import { AbstractStructRef } from "./AbstractStruct.js";
-import { GC } from "./GC.js";

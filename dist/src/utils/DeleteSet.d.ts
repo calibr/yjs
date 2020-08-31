@@ -27,10 +27,10 @@ export class DeleteSet {
     clients: Map<number, Array<DeleteItem>>;
 }
 export function iterateDeletedStructs(transaction: Transaction, ds: DeleteSet, f: (arg0: GC | Item) => void): void;
-export function findIndexDS(dis: DeleteItem[], clock: number): number | null;
+export function findIndexDS(dis: Array<DeleteItem>, clock: number): number | null;
 export function isDeleted(ds: DeleteSet, id: ID): boolean;
 export function sortAndMergeDeleteSet(ds: DeleteSet): void;
-export function mergeDeleteSets(dss: DeleteSet[]): DeleteSet;
+export function mergeDeleteSets(dss: Array<DeleteSet>): DeleteSet;
 export function addToDeleteSet(ds: DeleteSet, id: ID, length: number): void;
 export function createDeleteSet(): DeleteSet;
 export function createDeleteSetFromStructStore(ss: StructStore): DeleteSet;

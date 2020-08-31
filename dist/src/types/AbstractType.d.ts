@@ -61,7 +61,7 @@ export class AbstractType<EventType> {
      * @param {Transaction} transaction
      * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
      */
-    _callObserver(transaction: Transaction, parentSubs: Set<string | null>): void;
+    _callObserver(transaction: Transaction, parentSubs: Set<null | string>): void;
     /**
      * Observe all events that are created on this type.
      *
@@ -73,7 +73,7 @@ export class AbstractType<EventType> {
      *
      * @param {function(Array<YEvent>,Transaction):void} f Observer function
      */
-    observeDeep(f: (arg0: YEvent[], arg1: Transaction) => void): void;
+    observeDeep(f: (arg0: Array<YEvent>, arg1: Transaction) => void): void;
     /**
      * Unregister an observer function.
      *
@@ -85,42 +85,42 @@ export class AbstractType<EventType> {
      *
      * @param {function(Array<YEvent>,Transaction):void} f Observer function
      */
-    unobserveDeep(f: (arg0: YEvent[], arg1: Transaction) => void): void;
+    unobserveDeep(f: (arg0: Array<YEvent>, arg1: Transaction) => void): void;
     /**
      * @abstract
      * @return {any}
      */
     toJSON(): any;
 }
-export function typeListToArray(type: AbstractType<any>): any[];
-export function typeListToArraySnapshot(type: AbstractType<any>, snapshot: Snapshot): any[];
+export function typeListToArray(type: AbstractType<any>): Array<any>;
+export function typeListToArraySnapshot(type: AbstractType<any>, snapshot: Snapshot): Array<any>;
 export function typeListForEach(type: AbstractType<any>, f: (arg0: any, arg1: number, arg2: any) => void): void;
 export function typeListMap<C, R>(type: AbstractType<any>, f: (arg0: C, arg1: number, arg2: AbstractType<any>) => R): R[];
 export function typeListCreateIterator(type: AbstractType<any>): IterableIterator<any>;
 export function typeListForEachSnapshot(type: AbstractType<any>, f: (arg0: any, arg1: number, arg2: AbstractType<any>) => void, snapshot: Snapshot): void;
 export function typeListGet(type: AbstractType<any>, index: number): any;
-export function typeListInsertGenericsAfter(transaction: Transaction, parent: AbstractType<any>, referenceItem: Item | null, content: (string | number | boolean | any[] | Uint8Array | {
+export function typeListInsertGenericsAfter(transaction: Transaction, parent: AbstractType<any>, referenceItem: Item | null, content: Array<{
     [x: string]: any;
-})[]): void;
-export function typeListInsertGenerics(transaction: Transaction, parent: AbstractType<any>, index: number, content: (string | number | any[] | Uint8Array | {
+} | Array<any> | boolean | number | string | Uint8Array>): void;
+export function typeListInsertGenerics(transaction: Transaction, parent: AbstractType<any>, index: number, content: Array<{
     [x: string]: any;
-})[]): void;
+} | Array<any> | number | string | Uint8Array>): void;
 export function typeListDelete(transaction: Transaction, parent: AbstractType<any>, index: number, length: number): void;
 export function typeMapDelete(transaction: Transaction, parent: AbstractType<any>, key: string): void;
-export function typeMapSet(transaction: Transaction, parent: AbstractType<any>, key: string, value: string | number | Object | any[] | Uint8Array | AbstractType<any>): void;
-export function typeMapGet(parent: AbstractType<any>, key: string): string | number | any[] | Uint8Array | AbstractType<any> | {
+export function typeMapSet(transaction: Transaction, parent: AbstractType<any>, key: string, value: Object | number | Array<any> | string | Uint8Array | AbstractType<any>): void;
+export function typeMapGet(parent: AbstractType<any>, key: string): {
     [x: string]: any;
-} | undefined;
+} | number | Array<any> | string | Uint8Array | AbstractType<any> | undefined;
 export function typeMapGetAll(parent: AbstractType<any>): {
-    [x: string]: string | number | any[] | Uint8Array | AbstractType<any> | {
+    [x: string]: {
         [x: string]: any;
-    } | undefined;
+    } | number | Array<any> | string | Uint8Array | AbstractType<any> | undefined;
 };
 export function typeMapHas(parent: AbstractType<any>, key: string): boolean;
-export function typeMapGetSnapshot(parent: AbstractType<any>, key: string, snapshot: Snapshot): string | number | any[] | Uint8Array | AbstractType<any> | {
+export function typeMapGetSnapshot(parent: AbstractType<any>, key: string, snapshot: Snapshot): {
     [x: string]: any;
-} | undefined;
-export function createMapIterator(map: Map<string, Item>): IterableIterator<any[]>;
+} | number | Array<any> | string | Uint8Array | AbstractType<any> | undefined;
+export function createMapIterator(map: Map<string, Item>): IterableIterator<Array<any>>;
 import { Transaction } from "../utils/Transaction.js";
 import { Item } from "../structs/Item.js";
 import { Doc } from "../utils/Doc.js";

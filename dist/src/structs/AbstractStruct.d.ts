@@ -9,7 +9,7 @@ export class AbstractStruct {
      * @type {ID}
      * @readonly
      */
-    id: ID;
+    readonly id: ID;
     length: number;
     deleted: boolean;
     /**
@@ -49,7 +49,7 @@ export class AbstractStructRef {
      * @param {Transaction} transaction
      * @return {Array<ID|null>}
      */
-    getMissing(transaction: Transaction): (ID | null)[];
+    getMissing(transaction: Transaction): Array<ID | null>;
     /**
      * @param {Transaction} transaction
      * @param {StructStore} store

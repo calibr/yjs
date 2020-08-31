@@ -1,5 +1,5 @@
 export function writeClientsStructs(encoder: encoding.Encoder, store: StructStore, _sm: Map<number, number>): void;
-export function readClientsStructRefs(decoder: decoding.Decoder): Map<number, (GCRef | ItemRef)[]>;
+export function readClientsStructRefs(decoder: decoding.Decoder): Map<number, Array<GCRef | ItemRef>>;
 export function tryResumePendingDeleteReaders(transaction: Transaction, store: StructStore): void;
 export function writeStructsFromTransaction(encoder: encoding.Encoder, transaction: Transaction): void;
 export function readStructs(decoder: decoding.Decoder, transaction: Transaction, store: StructStore): void;

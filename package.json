@@ -98,7 +98,8 @@
     "standard": "^11.0.1",
     "tui-jsdoc-template": "^1.2.2",
     "codemirror": "^5.42.0",
-    "crel": "^3.1.0"
+    "crel": "^3.1.0",
+    "isomorphic.js": "dtilik/isomorphic.js#318fa396c641fb9c087420c0c060911713a3cbed"
   },
   "optionalDependencies": {
     "level": "^5.0.1",
